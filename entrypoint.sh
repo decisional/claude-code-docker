@@ -9,19 +9,20 @@ echo "Claude Code Docker Environment"
 echo "==============================="
 
 # Ensure Claude credentials directory has correct permissions
-if [ -d "/root/.claude" ]; then
+CLAUDE_DIR="${HOME}/.claude"
+if [ -d "$CLAUDE_DIR" ]; then
     # Fix permissions on credentials file if it exists
-    if [ -f "/root/.claude/.credentials.json" ]; then
-        chmod 600 /root/.claude/.credentials.json
+    if [ -f "$CLAUDE_DIR/.credentials.json" ]; then
+        chmod 600 "$CLAUDE_DIR/.credentials.json" 2>/dev/null || true
         echo "✓ Claude credentials directory found"
-        echo "  Credentials file: $(ls -lh /root/.claude/.credentials.json | awk '{print $5, $6, $7, $8, $9}')"
+        echo "  Credentials file: $(ls -lh $CLAUDE_DIR/.credentials.json | awk '{print $5, $6, $7, $8, $9}')"
     else
-        echo "⚠ Warning: .credentials.json not found in /root/.claude"
-        echo "  Contents of /root/.claude:"
-        ls -la /root/.claude | head -10
+        echo "⚠ Warning: .credentials.json not found in $CLAUDE_DIR"
+        echo "  Contents of $CLAUDE_DIR:"
+        ls -la "$CLAUDE_DIR" | head -10
     fi
 else
-    echo "⚠ Warning: Claude credentials directory not found at /root/.claude"
+    echo "⚠ Warning: Claude credentials directory not found at $CLAUDE_DIR"
 fi
 
 # Check if GIT_REPO_URL is set and workspace is empty
@@ -63,5 +64,22 @@ echo ""
 echo "Working directory: $(pwd)"
 echo ""
 
-# Execute the command passed to the container
-exec "$@"
+# Build Claude command with optional flags
+if [ "$1" = "claude" ]; then
+    CLAUDE_CMD="claude"
+
+    # Add --dangerously-skip-permissions if enabled
+    # This bypasses all permission checks (includes both skip-permissions and dangerously)
+    if [ "$CLAUDE_SKIP_PERMISSIONS" = "true" ]; then
+        CLAUDE_CMD="$CLAUDE_CMD --dangerously-skip-permissions"
+        echo "⚠️  Running with --dangerously-skip-permissions flag"
+        echo "    This bypasses all permission checks - use only in trusted sandboxes"
+    fi
+
+    shift
+    echo ""
+    exec $CLAUDE_CMD "$@"
+else
+    # Execute the command passed to the container as-is
+    exec "$@"
+fi

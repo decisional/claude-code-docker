@@ -62,6 +62,21 @@ GIT_BRANCH=main  # Optional: specify branch
 GIT_CLONE_DIR=my-project  # Optional: specify directory name
 ```
 
+### Configure Claude Code Runtime Flags (Optional)
+
+Edit `.env` to run Claude with the `--dangerously-skip-permissions` flag:
+
+```bash
+# .env
+# Enable --dangerously-skip-permissions flag
+CLAUDE_SKIP_PERMISSIONS=true
+```
+
+**Warning:** Use this flag with extreme caution:
+- `--dangerously-skip-permissions`: Bypasses all permission checks (includes both auto-approve and sandboxing bypass)
+- Recommended only for sandboxes with no internet access
+- Use only in trusted Docker container environments where you want full automation
+
 ## Usage
 
 ### If you used build.sh (Credentials Baked In)
@@ -132,6 +147,7 @@ docker run -it --rm \
 - Claude Code CLI
 - Git
 - Automatic git repository cloning (optional, configured via .env)
+- Configurable Claude runtime flag (`--dangerously-skip-permissions`)
 - Writable Claude credentials directory (memories and settings persist)
 - Writable Git configuration and SSH keys (git operations persist, can do git clone/push)
 - Persistent workspace directory
