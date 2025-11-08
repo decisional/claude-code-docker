@@ -9,10 +9,11 @@ RUN apt-get update && apt-get install -y \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Install GitHub CLI
-RUN wget https://github.com/cli/cli/releases/download/v2.40.0/gh_2.40.0_linux_amd64.deb && \
-    dpkg -i gh_2.40.0_linux_amd64.deb && \
-    rm gh_2.40.0_linux_amd64.deb
+# Install GitHub CLI (detect architecture)
+RUN ARCH=$(dpkg --print-architecture) && \
+    wget https://github.com/cli/cli/releases/download/v2.40.0/gh_2.40.0_linux_${ARCH}.deb && \
+    dpkg -i gh_2.40.0_linux_${ARCH}.deb && \
+    rm gh_2.40.0_linux_${ARCH}.deb
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
