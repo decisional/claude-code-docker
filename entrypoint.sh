@@ -63,5 +63,26 @@ echo ""
 echo "Working directory: $(pwd)"
 echo ""
 
-# Execute the command passed to the container
-exec "$@"
+# Build Claude command with optional flags
+if [ "$1" = "claude" ]; then
+    CLAUDE_CMD="claude"
+
+    # Add --skip-permissions if enabled
+    if [ "$CLAUDE_SKIP_PERMISSIONS" = "true" ]; then
+        CLAUDE_CMD="$CLAUDE_CMD --skip-permissions"
+        echo "⚠️  Running with --skip-permissions flag"
+    fi
+
+    # Add --dangerously if enabled
+    if [ "$CLAUDE_DANGEROUSLY" = "true" ]; then
+        CLAUDE_CMD="$CLAUDE_CMD --dangerously"
+        echo "⚠️  Running with --dangerously flag"
+    fi
+
+    shift
+    echo ""
+    exec $CLAUDE_CMD "$@"
+else
+    # Execute the command passed to the container as-is
+    exec "$@"
+fi
