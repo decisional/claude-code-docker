@@ -21,6 +21,8 @@ services:
     volumes:
       # Mount your project directory
       - ./workspace:/workspace
+      # Mount shared directory (read-only, accessible by all instances)
+      - ./shared:/shared:ro
       # Mount Claude credentials with write access (for memories and settings)
       - ./claude-data:/home/node/.claude
       # Mount Git config with write access (for git operations and storage)

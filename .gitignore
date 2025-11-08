@@ -1,5 +1,6 @@
 # Workspace and data directories
 workspace/
+shared/
 claude-data/
 git-data/
 .claude/

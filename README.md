@@ -151,6 +151,30 @@ docker-compose down
 
 **Note:** If using `docker-compose run --rm`, you may be asked to authenticate each time since the container is destroyed after exit.
 
+### Sharing Data Across Instances
+
+All instances have read-only access to a shared directory at `/shared` inside the container:
+
+```bash
+# On your host machine, copy data to the shared folder
+cp -r /path/to/dataset ./shared/mydata
+
+# Now all running instances can access it at /shared/mydata (read-only)
+./cc-exec instance1
+# Inside container: ls /shared/mydata
+
+./cc-exec instance2
+# Inside container: ls /shared/mydata
+```
+
+**Use cases:**
+- Share datasets across multiple instances (read-only)
+- Provide common configuration or reference data
+- Share models, prompts, or test data
+- Quick data staging without rebuilding containers
+
+**Note:** The shared directory is mounted read-only (`:ro`) inside containers for safety. Containers cannot modify files in `/shared`. To update shared data, modify files in `./shared` on your host machine.
+
 ## Advanced Usage
 
 ### Using Docker directly (without docker-compose)
