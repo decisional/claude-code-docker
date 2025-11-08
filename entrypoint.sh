@@ -67,16 +67,12 @@ echo ""
 if [ "$1" = "claude" ]; then
     CLAUDE_CMD="claude"
 
-    # Add --skip-permissions if enabled
+    # Add --dangerously-skip-permissions if enabled
+    # This bypasses all permission checks (includes both skip-permissions and dangerously)
     if [ "$CLAUDE_SKIP_PERMISSIONS" = "true" ]; then
-        CLAUDE_CMD="$CLAUDE_CMD --skip-permissions"
-        echo "⚠️  Running with --skip-permissions flag"
-    fi
-
-    # Add --dangerously if enabled
-    if [ "$CLAUDE_DANGEROUSLY" = "true" ]; then
-        CLAUDE_CMD="$CLAUDE_CMD --dangerously"
-        echo "⚠️  Running with --dangerously flag"
+        CLAUDE_CMD="$CLAUDE_CMD --dangerously-skip-permissions"
+        echo "⚠️  Running with --dangerously-skip-permissions flag"
+        echo "    This bypasses all permission checks - use only in trusted sandboxes"
     fi
 
     shift

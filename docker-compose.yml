@@ -19,7 +19,6 @@ services:
       - CLAUDE_CONFIG_DIR=/root/.claude
       # Claude Code runtime flags (loaded from .env)
       - CLAUDE_SKIP_PERMISSIONS=${CLAUDE_SKIP_PERMISSIONS:-false}
-      - CLAUDE_DANGEROUSLY=${CLAUDE_DANGEROUSLY:-false}
     volumes:
       # Mount your project directory
       - ./workspace:/workspace

@@ -30,8 +30,7 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Environment variables for Claude Code flags
-ENV CLAUDE_SKIP_PERMISSIONS="" \
-    CLAUDE_DANGEROUSLY=""
+ENV CLAUDE_SKIP_PERMISSIONS=""
 
 # Set entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
