@@ -9,8 +9,61 @@ echo "Building Claude Code Docker Image..."
 echo "===================================="
 echo ""
 
+# Setup Git configuration files (needed for docker-compose volume mounts)
+echo "1. Setting up Git configuration files..."
+LOCAL_GIT_DIR="./git-data"
+GIT_CONFIG="$HOME/.gitconfig"
+SSH_DIR="$HOME/.ssh"
+
+mkdir -p "$LOCAL_GIT_DIR"
+
+# Copy gitconfig if it exists
+if [ -f "$GIT_CONFIG" ]; then
+    cp "$GIT_CONFIG" "$LOCAL_GIT_DIR/.gitconfig"
+    echo "✅ Git config copied to $LOCAL_GIT_DIR/.gitconfig"
+else
+    # Create a basic gitconfig if none exists
+    cat > "$LOCAL_GIT_DIR/.gitconfig" << 'EOF'
+[init]
+    defaultBranch = main
+[user]
+    # Configure your details:
+    # name = Your Name
+    # email = your.email@example.com
+EOF
+    echo "✅ Created basic Git config at $LOCAL_GIT_DIR/.gitconfig"
+    echo "⚠️  IMPORTANT: Edit $LOCAL_GIT_DIR/.gitconfig to set your name and email"
+fi
+
+# Copy SSH keys if they exist (for git operations)
+if [ -d "$SSH_DIR" ]; then
+    mkdir -p "$LOCAL_GIT_DIR/.ssh"
+    if [ -f "$SSH_DIR/id_rsa" ] || [ -f "$SSH_DIR/id_ed25519" ]; then
+        cp -r "$SSH_DIR"/* "$LOCAL_GIT_DIR/.ssh/" 2>/dev/null || true
+        chmod 700 "$LOCAL_GIT_DIR/.ssh"
+        chmod 600 "$LOCAL_GIT_DIR/.ssh/"* 2>/dev/null || true
+        echo "✅ SSH keys copied to $LOCAL_GIT_DIR/.ssh"
+    else
+        echo "⚠️  No SSH keys found in $SSH_DIR"
+    fi
+fi
+
+# Create workspace directory if it doesn't exist
+if [ ! -d "./workspace" ]; then
+    mkdir -p ./workspace
+    echo "✅ Created workspace directory"
+fi
+
+# Setup .env file if it doesn't exist
+if [ ! -f ".env" ]; then
+    cp .env.example .env
+    echo "✅ Created .env file from .env.example"
+fi
+
+echo ""
+
 # Extract credentials from macOS Keychain
-echo "1. Extracting credentials from macOS Keychain..."
+echo "2. Extracting credentials from macOS Keychain..."
 CREDENTIALS=$(security find-generic-password -s "Claude Code-credentials" -w 2>&1)
 
 if [ -z "$CREDENTIALS" ] || echo "$CREDENTIALS" | grep -q "could not be found"; then
@@ -23,7 +76,7 @@ echo "✅ Credentials extracted from keychain"
 
 # Create temporary credentials file for Docker build
 echo ""
-echo "2. Creating temporary credentials file..."
+echo "3. Creating temporary credentials file..."
 mkdir -p ./.build-temp
 echo "$CREDENTIALS" > ./.build-temp/.credentials.json
 chmod 600 ./.build-temp/.credentials.json
@@ -31,11 +84,11 @@ echo "✅ Temporary credentials file created"
 
 # Build Docker image with credentials
 echo ""
-echo "3. Building Docker image..."
+echo "4. Building Docker image..."
 docker-compose build --no-cache
 
 echo ""
-echo "4. Cleaning up temporary files..."
+echo "5. Cleaning up temporary files..."
 rm -rf ./.build-temp
 echo "✅ Cleanup complete"
 
