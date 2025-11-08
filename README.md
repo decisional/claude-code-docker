@@ -218,6 +218,32 @@ RUN apt-get update && apt-get install -y \
 
 ## Troubleshooting
 
+### Error: "not a directory" when mounting .gitconfig
+
+If you see an error like:
+```
+error mounting ".../git-data/.gitconfig" to rootfs at "/root/.gitconfig":
+not a directory: Are you trying to mount a directory onto a file (or vice-versa)?
+```
+
+This happens when Docker created `.gitconfig` as a directory instead of a file. To fix:
+
+```bash
+# Quick fix - run the fix script
+./fix-gitconfig.sh
+```
+
+Or manually:
+```bash
+# Remove the incorrect directory
+rm -rf git-data/.gitconfig
+
+# Run build.sh again (it now handles git config setup)
+./build.sh
+```
+
+**Why this happens:** Earlier versions of `build.sh` didn't create the `git-data/.gitconfig` file. When `docker-compose` tried to mount the non-existent file, Docker created it as a directory instead, causing the error.
+
 ### Claude asks for login every time
 
 This happens if the credentials aren't being persisted properly. To fix:
