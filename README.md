@@ -5,138 +5,125 @@ A Docker container with Claude Code CLI and Git pre-installed.
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Claude Code credentials (login with `claude login` on your host machine first)
+- Claude Code installed on macOS (run `claude login` to authenticate)
+- Git configured on your host machine
 
 ## Setup
 
-1. **Login to Claude on your host machine** (if you haven't already):
-   ```bash
-   claude login
-   ```
+### Option 1: Build Image with Credentials Baked In (Recommended)
 
-2. **Run the setup script**:
-   ```bash
-   ./setup.sh
-   ```
+This approach extracts credentials from your macOS Keychain and bakes them directly into the Docker image:
 
-   This script will:
-   - Copy your Claude credentials from `~/.claude/` to `./claude-data/`
-   - Copy your Git config from `~/.gitconfig` to `./git-data/.gitconfig`
-   - Copy your SSH keys from `~/.ssh/` to `./git-data/.ssh/`
-   - Create the workspace directory
-   - Create `.env` file and optionally configure a git repository to auto-clone
-   - Local copies allow the container to save memories, settings, and git credentials
+```bash
+# 1. Login to Claude on your Mac (one-time)
+claude login
 
-3. **Optional: Configure automatic git repository cloning**:
+# 2. Build the Docker image with credentials
+./build.sh
 
-   Edit the `.env` file to specify a repository to automatically clone:
-   ```bash
-   # .env
-   GIT_REPO_URL=git@github.com:username/repo.git
-   GIT_BRANCH=main  # Optional: specify branch
-   GIT_CLONE_DIR=my-project  # Optional: specify directory name
-   ```
+# 3. Run containers - no authentication needed!
+docker-compose run --rm claude-code
+```
 
-   Or let the setup script prompt you for these values interactively.
+**How it works:**
+- `build.sh` extracts your OAuth credentials from macOS Keychain
+- Credentials are copied into the Docker image during build
+- Every container from this image is pre-authenticated
+- Rebuild when credentials expire or you want to update
+
+### Option 2: Volume-Based Setup (Alternative)
+
+If you prefer to manage credentials as mounted volumes:
+
+```bash
+# 1. Run setup script
+./setup.sh
+
+# This will:
+# - Copy Git config from ~/.gitconfig to ./git-data/
+# - Copy SSH keys from ~/.ssh/ to ./git-data/
+# - Create workspace directory
+# - Create .env file for git repository configuration
+
+# 2. Authenticate on first run
+docker-compose up -d
+docker exec -it claude-code-env claude
+# Login when prompted - credentials saved to ./claude-data/
+```
+
+### Configure Automatic Git Repository Cloning (Optional)
+
+Edit `.env` to auto-clone a repository on container startup:
+
+```bash
+# .env
+GIT_REPO_URL=git@github.com:username/repo.git
+GIT_BRANCH=main  # Optional: specify branch
+GIT_CLONE_DIR=my-project  # Optional: specify directory name
+```
 
 ## Usage
 
-### Authentication
+### If you used build.sh (Credentials Baked In)
 
-Claude Code requires authentication to work. There are two approaches:
+Containers are pre-authenticated - just run them:
 
-**Option 1: Authenticate once in a persistent container (Recommended)**
+```bash
+# One-off container (recommended for quick tasks)
+docker-compose run --rm claude-code
 
-Use a persistent container instead of `--rm` to keep the session alive:
+# Or persistent container
+docker-compose up -d
+docker exec -it claude-code-env claude
+
+# Stop when done
+docker-compose down
+```
+
+**Benefits:**
+- ✅ No authentication prompts
+- ✅ Works with `--rm` (disposable containers)
+- ✅ Credentials in the image itself
+- ⚠️ Rebuild image when credentials expire
+
+### If you used setup.sh (Volume-Based)
+
+Use persistent containers to avoid re-authentication:
 
 ```bash
 # Start a persistent container
 docker-compose up -d
 
-# Exec into it and run Claude (login once)
+# Run Claude (authenticate on first run)
 docker exec -it claude-code-env claude
 
-# Authenticate when prompted
-# Now you can keep using this same container
-
-# Attach to it anytime:
-docker attach claude-code-env
-
-# Or run new Claude sessions in the same container:
-docker exec -it claude-code-env claude
-```
-
-**Option 2: Fresh container each time (will ask for login)**
-
-If you use `--rm`, each container is destroyed after exit:
-
-```bash
-# This will ask for authentication each time
-docker-compose run --rm claude-code
-# You'll need to login on each run
-```
-
-**Why does this happen?**
-
-The credentials file (`./claude-data/.credentials.json`) containing your OAuth tokens **IS** properly saved and mounted into containers. However, Claude Code may perform additional runtime session validation beyond just checking the credentials file, which can trigger re-authentication in some scenarios.
-
-**What's being saved:**
-- OAuth Access Token (for API calls)
-- OAuth Refresh Token (to renew access)
-- Token expiration timestamp
-- Your subscription type and scopes
-
-All of this persists in `./claude-data/.credentials.json` on your host machine.
-
-**Why can't we copy credentials from your Mac?**
-
-On macOS, Claude Code stores credentials in the **system Keychain** (encrypted storage), not in a file. Docker containers cannot access your Mac's Keychain due to isolation. This is why you need to authenticate once inside the container, which then creates its own `.credentials.json` file that persists in `./claude-data/`.
-
-### Quick Start (Persistent Container)
-
-```bash
-# Start the container in background
-docker-compose up -d
-
-# Run Claude Code (authenticate once on first run)
+# Future runs in same container - no login needed
 docker exec -it claude-code-env claude
 
-# Stop the container when done
+# Stop when done
 docker-compose down
 ```
 
-### Alternative: One-off Container
+**Note:** If using `docker-compose run --rm`, you may be asked to authenticate each time since the container is destroyed after exit.
+
+## Advanced Usage
+
+### Using Docker directly (without docker-compose)
 
 ```bash
-# Run and remove after exit (will ask for login each time)
-docker-compose run --rm claude-code
-```
+# Build image (uses build.sh approach)
+./build.sh
 
-### Using Docker directly
-
-**Build the image**:
-```bash
-docker build -t claude-code .
-```
-
-**Run interactively**:
-```bash
+# Run container
 docker run -it --rm \
   -v $(pwd)/workspace:/workspace \
-  -v $(pwd)/claude-data:/root/.claude \
-  -v $(pwd)/git-data/.gitconfig:/root/.gitconfig \
-  -v $(pwd)/git-data/.ssh:/root/.ssh \
-  claude-code
-```
+  -e GIT_REPO_URL=https://github.com/user/repo \
+  claude-code-docker_claude-code
 
-**Run with bash access**:
-```bash
+# Or with bash access
 docker run -it --rm \
   -v $(pwd)/workspace:/workspace \
-  -v $(pwd)/claude-data:/root/.claude \
-  -v $(pwd)/git-data/.gitconfig:/root/.gitconfig \
-  -v $(pwd)/git-data/.ssh:/root/.ssh \
-  claude-code /bin/bash
+  claude-code-docker_claude-code /bin/bash
 ```
 
 ## Features
