@@ -54,6 +54,12 @@ if [ ! -d "./workspace" ]; then
     echo "✅ Created workspace directory"
 fi
 
+# Create shared directory if it doesn't exist
+if [ ! -d "./shared" ]; then
+    mkdir -p ./shared
+    echo "✅ Created shared directory"
+fi
+
 # Setup .env file if it doesn't exist
 if [ ! -f ".env" ]; then
     cp .env.example .env
