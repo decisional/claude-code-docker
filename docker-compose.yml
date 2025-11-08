@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  claude-code:
+    build: .
+    container_name: claude-code-env
+    stdin_open: true
+    tty: true
+    env_file:
+      - .env
+    environment:
+      # Git repository configuration (loaded from .env)
+      - GIT_REPO_URL=${GIT_REPO_URL}
+      - GIT_BRANCH=${GIT_BRANCH}
+      - GIT_CLONE_DIR=${GIT_CLONE_DIR}
+      # Set HOME to ensure Claude Code uses /root/.claude
+      - HOME=/root
+      # Claude Code configuration directory
+      - CLAUDE_CONFIG_DIR=/root/.claude
+    volumes:
+      # Mount your project directory
+      - ./workspace:/workspace
+      # Mount Claude credentials with write access (for memories and settings)
+      - ./claude-data:/root/.claude
+      # Mount Git config with write access (for git operations and storage)
+      - ./git-data/.gitconfig:/root/.gitconfig
+      # Mount SSH keys with write access (for git clone/push operations)
+      - ./git-data/.ssh:/root/.ssh
+    working_dir: /workspace

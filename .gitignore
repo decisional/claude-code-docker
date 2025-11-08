@@ -1,0 +1,12 @@
+# Workspace and data directories
+workspace/
+claude-data/
+git-data/
+.claude/
+
+# Environment and build files
+.env
+.build-temp/
+
+# Docker
+.dockerignore
