@@ -79,6 +79,36 @@ CLAUDE_SKIP_PERMISSIONS=true
 
 ## Usage
 
+### Quick Start Scripts (Recommended)
+
+The easiest way to manage multiple Claude Code instances:
+
+```bash
+# Start a new instance (auto-creates from current directory name)
+./cc-start
+
+# Or specify a custom name
+./cc-start my-project
+
+# Resume/connect to an existing instance
+./cc-exec my-project
+
+# List all instances
+./cc-list
+
+# Stop an instance
+./cc-stop my-project
+
+# Remove an instance
+./cc-rm my-project
+```
+
+**How it works:**
+- Each instance gets its own isolated container
+- Instances stay alive in the background (won't die on Ctrl+C)
+- You can run multiple instances simultaneously for different projects
+- Instance names are used as docker-compose project names
+
 ### If you used build.sh (Credentials Baked In)
 
 Containers are pre-authenticated - just run them:
@@ -89,7 +119,7 @@ docker-compose run --rm claude-code
 
 # Or persistent container
 docker-compose up -d
-docker exec -it claude-code-env claude
+docker-compose exec claude-code claude
 
 # Stop when done
 docker-compose down
@@ -110,10 +140,10 @@ Use persistent containers to avoid re-authentication:
 docker-compose up -d
 
 # Run Claude (authenticate on first run)
-docker exec -it claude-code-env claude
+docker-compose exec claude-code claude
 
 # Future runs in same container - no login needed
-docker exec -it claude-code-env claude
+docker-compose exec claude-code claude
 
 # Stop when done
 docker-compose down

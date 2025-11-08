@@ -1,0 +1,20 @@
+#!/bin/bash
+# Remove a Claude Code instance
+# Usage: ./cc-rm [instance-name]
+
+set -e
+
+if [ -z "$1" ]; then
+    echo "Usage: ./cc-rm <instance-name>"
+    echo ""
+    echo "Available instances:"
+    docker ps -a --filter "name=claude-" --format "  - {{.Names}}" | sed 's/-claude-code-1//' | sed 's/claude-//'
+    exit 1
+fi
+
+INSTANCE_NAME="$1"
+PROJECT_NAME="claude-${INSTANCE_NAME}"
+
+echo "🗑️  Removing Claude Code instance: $INSTANCE_NAME"
+docker-compose -p "$PROJECT_NAME" down
+echo "✓ Instance removed"

@@ -1,0 +1,20 @@
+#!/bin/bash
+# Stop a Claude Code instance
+# Usage: ./cc-stop [instance-name]
+
+set -e
+
+if [ -z "$1" ]; then
+    echo "Usage: ./cc-stop <instance-name>"
+    echo ""
+    echo "Available instances:"
+    docker ps --filter "name=claude-" --format "  - {{.Names}}" | sed 's/-claude-code-1//' | sed 's/claude-//'
+    exit 1
+fi
+
+INSTANCE_NAME="$1"
+PROJECT_NAME="claude-${INSTANCE_NAME}"
+
+echo "🛑 Stopping Claude Code instance: $INSTANCE_NAME"
+docker-compose -p "$PROJECT_NAME" stop
+echo "✓ Instance stopped"
