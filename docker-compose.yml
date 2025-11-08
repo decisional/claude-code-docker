@@ -2,8 +2,7 @@ version: '3.8'
 
 services:
   claude-code:
-    build: .
-    container_name: claude-code-env
+    image: llm-docker-claude-code:latest
     stdin_open: true
     tty: true
     env_file:

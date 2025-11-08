@@ -24,7 +24,7 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     echo "✓ Container already running"
     echo "  Connecting to existing instance..."
     echo ""
-    docker-compose -p "$PROJECT_NAME" exec claude-code claude
+    docker-compose -p "$PROJECT_NAME" exec -it claude-code claude
 else
     # Check if container exists but is stopped
     if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
@@ -40,5 +40,5 @@ else
     echo "✓ Container started successfully"
     echo "  Launching Claude Code..."
     echo ""
-    docker-compose -p "$PROJECT_NAME" exec claude-code claude
+    docker-compose -p "$PROJECT_NAME" exec -it claude-code claude
 fi
