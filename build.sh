@@ -91,7 +91,7 @@ echo "✅ Temporary credentials file created"
 # Build Docker image with credentials
 echo ""
 echo "4. Building Docker image..."
-docker-compose build --no-cache
+docker build --no-cache -t llm-docker-claude-code:latest .
 
 echo ""
 echo "5. Cleaning up temporary files..."
