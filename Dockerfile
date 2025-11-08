@@ -29,6 +29,10 @@ RUN git config --global init.defaultBranch main
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Environment variables for Claude Code flags
+ENV CLAUDE_SKIP_PERMISSIONS="" \
+    CLAUDE_DANGEROUSLY=""
+
 # Set entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
 
