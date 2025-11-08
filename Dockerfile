@@ -1,10 +1,11 @@
 FROM node:20-slim
 
-# Install system dependencies including Git
+# Install system dependencies including Git and zsh
 RUN apt-get update && apt-get install -y \
     git \
     curl \
     ca-certificates \
+    zsh \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally
@@ -25,10 +26,11 @@ RUN chmod 600 /home/node/.claude/.credentials.json && \
 # Set up working directory
 WORKDIR /workspace
 
-# Configure Git as the node user
+# Configure Git and set zsh as default shell for node user
 USER node
 RUN git config --global init.defaultBranch main
 USER root
+RUN chsh -s /bin/zsh node
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh

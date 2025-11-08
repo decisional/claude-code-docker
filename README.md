@@ -93,6 +93,9 @@ The easiest way to manage multiple Claude Code instances:
 # Resume/connect to an existing instance
 ./cc-exec my-project
 
+# Open a zsh shell in an instance
+./cc-shell my-project
+
 # List all instances
 ./cc-list
 
