@@ -20,7 +20,7 @@ echo ""
 
 # Check if container exists and is running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
-    docker-compose -p "$PROJECT_NAME" exec -it claude-code claude
+    docker-compose -p "$PROJECT_NAME" exec -it claude-code /entrypoint.sh claude
 else
     if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         echo "❌ Container exists but is not running"
