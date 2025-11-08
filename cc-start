@@ -33,7 +33,7 @@ else
         docker-compose -p "$PROJECT_NAME" start
     else
         echo "✓ Creating new container..."
-        docker-compose -p "$PROJECT_NAME" up -d --build
+        docker-compose -p "$PROJECT_NAME" up -d
     fi
 
     echo ""
