@@ -1,0 +1,44 @@
+#!/bin/bash
+# Start a new Claude Code instance or attach to existing one
+# Usage: ./cc-start [instance-name]
+# If no name provided, uses current directory name
+
+set -e
+
+# Get instance name from argument or use current directory name
+if [ -n "$1" ]; then
+    INSTANCE_NAME="$1"
+else
+    INSTANCE_NAME=$(basename "$(pwd)")
+fi
+
+PROJECT_NAME="claude-${INSTANCE_NAME}"
+CONTAINER_NAME="${PROJECT_NAME}-claude-code-1"
+
+echo "🚀 Starting Claude Code instance: $INSTANCE_NAME"
+echo "   Project: $PROJECT_NAME"
+echo ""
+
+# Check if container already exists and is running
+if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+    echo "✓ Container already running"
+    echo "  Connecting to existing instance..."
+    echo ""
+    docker-compose -p "$PROJECT_NAME" exec claude-code claude
+else
+    # Check if container exists but is stopped
+    if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+        echo "✓ Container exists but stopped"
+        echo "  Starting existing container..."
+        docker-compose -p "$PROJECT_NAME" start
+    else
+        echo "✓ Creating new container..."
+        docker-compose -p "$PROJECT_NAME" up -d --build
+    fi
+
+    echo ""
+    echo "✓ Container started successfully"
+    echo "  Launching Claude Code..."
+    echo ""
+    docker-compose -p "$PROJECT_NAME" exec claude-code claude
+fi

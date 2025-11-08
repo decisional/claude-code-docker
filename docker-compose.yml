@@ -30,3 +30,4 @@ services:
       - ./git-data/.ssh:/home/node/.ssh
     working_dir: /workspace
     user: "1000:1000"
+    command: tail -f /dev/null
