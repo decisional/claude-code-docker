@@ -1,12 +1,18 @@
 FROM node:20-slim
 
-# Install system dependencies including Git and zsh
+# Install system dependencies including Git, zsh, and GitHub CLI
 RUN apt-get update && apt-get install -y \
     git \
     curl \
     ca-certificates \
     zsh \
+    wget \
     && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI
+RUN wget https://github.com/cli/cli/releases/download/v2.40.0/gh_2.40.0_linux_amd64.deb && \
+    dpkg -i gh_2.40.0_linux_amd64.deb && \
+    rm gh_2.40.0_linux_amd64.deb
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code

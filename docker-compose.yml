@@ -29,6 +29,8 @@ services:
       - ./git-data/.gitconfig:/home/node/.gitconfig
       # Mount SSH keys with write access (for git clone/push operations)
       - ./git-data/.ssh:/home/node/.ssh
+      # Mount GitHub CLI config (for gh commands)
+      - ./git-data/.config/gh:/home/node/.config/gh
     working_dir: /workspace
     user: "1000:1000"
     command: tail -f /dev/null

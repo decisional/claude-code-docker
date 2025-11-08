@@ -48,6 +48,17 @@ if [ -d "$SSH_DIR" ]; then
     fi
 fi
 
+# Copy GitHub CLI config if it exists
+GH_CONFIG_DIR="$HOME/.config/gh"
+if [ -d "$GH_CONFIG_DIR" ]; then
+    mkdir -p "$LOCAL_GIT_DIR/.config/gh"
+    cp -r "$GH_CONFIG_DIR"/* "$LOCAL_GIT_DIR/.config/gh/" 2>/dev/null || true
+    echo "✅ GitHub CLI config copied to $LOCAL_GIT_DIR/.config/gh"
+else
+    echo "⚠️  No GitHub CLI config found at $GH_CONFIG_DIR"
+    echo "   Run 'gh auth login' on your host machine to authenticate"
+fi
+
 # Create workspace directory if it doesn't exist
 if [ ! -d "./workspace" ]; then
     mkdir -p ./workspace

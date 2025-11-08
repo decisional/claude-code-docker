@@ -27,9 +27,19 @@ docker-compose run --rm claude-code
 
 **How it works:**
 - `build.sh` extracts your OAuth credentials from macOS Keychain
+- Copies Git config, SSH keys, and GitHub CLI config to ./git-data/
 - Credentials are copied into the Docker image during build
 - Every container from this image is pre-authenticated
 - Rebuild when credentials expire or you want to update
+
+**For GitHub operations (push, PR creation):**
+```bash
+# Authenticate GitHub CLI on your host first (one-time)
+gh auth login
+
+# Then build - it will copy your gh config
+./build.sh
+```
 
 ### Option 2: Volume-Based Setup (Alternative)
 
