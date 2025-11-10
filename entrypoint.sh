@@ -42,12 +42,26 @@ if [ -n "$GIT_REPO_URL" ]; then
     if [ ! -d "$TARGET_DIR" ]; then
         echo "Cloning repository to $TARGET_DIR..."
 
-        # Clone with branch if specified
-        if [ -n "$GIT_BRANCH" ]; then
-            git clone --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$TARGET_DIR"
-            echo "Cloned branch: $GIT_BRANCH"
+        # Default to main if no branch specified
+        BRANCH="${GIT_BRANCH:-main}"
+
+        # Try to clone with the specified branch
+        if git clone --branch "$BRANCH" "$GIT_REPO_URL" "$TARGET_DIR" 2>/dev/null; then
+            echo "✓ Cloned existing branch: $BRANCH"
         else
-            git clone "$GIT_REPO_URL" "$TARGET_DIR"
+            echo "⚠ Branch '$BRANCH' doesn't exist remotely"
+            echo "  Cloning main and creating branch '$BRANCH' from it..."
+
+            # Clone main branch
+            git clone --branch main "$GIT_REPO_URL" "$TARGET_DIR"
+            cd "$TARGET_DIR"
+
+            # Pull latest from main
+            git pull origin main
+
+            # Create and checkout new branch from main
+            git checkout -b "$BRANCH"
+            echo "✓ Created new branch '$BRANCH' from latest main"
         fi
 
         echo "Repository cloned successfully!"
