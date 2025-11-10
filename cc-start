@@ -45,6 +45,14 @@ fi
 # Check if container already exists and is running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     echo "✓ Container already running"
+    
+    # Copy Claude instructions if they exist locally
+    if [ -f "$HOME/.claude/CLAUDE.md" ]; then
+        echo "  Copying Claude instructions..."
+        docker-compose -p "$PROJECT_NAME" exec -T claude-code mkdir -p /root/.claude
+        docker cp "$HOME/.claude/CLAUDE.md" "${CONTAINER_NAME}:/root/.claude/CLAUDE.md"
+    fi
+    
     echo "  Connecting to existing instance..."
     echo ""
     docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh claude
@@ -65,6 +73,14 @@ else
 
     echo ""
     echo "✓ Container started successfully"
+    
+    # Copy Claude instructions if they exist locally
+    if [ -f "$HOME/.claude/CLAUDE.md" ]; then
+        echo "  Copying Claude instructions..."
+        docker-compose -p "$PROJECT_NAME" exec -T claude-code mkdir -p /root/.claude
+        docker cp "$HOME/.claude/CLAUDE.md" "${CONTAINER_NAME}:/root/.claude/CLAUDE.md"
+    fi
+    
     echo "  Launching Claude Code..."
     echo ""
     docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh claude
