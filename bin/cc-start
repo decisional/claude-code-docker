@@ -1,19 +1,28 @@
 #!/bin/bash
 # Start a new Claude Code instance or attach to existing one
-# Usage: ./cc-start [instance-name] [--branch branch-name]
+# Usage: cc-start [instance-name] [--branch branch-name] [--reconfigure]
 # If no name provided, uses current directory name
 
 set -e
 
+# Source config functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/config-functions.sh"
+
 # Parse arguments
 INSTANCE_NAME=""
 GIT_BRANCH_OVERRIDE=""
+RECONFIGURE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --branch)
             GIT_BRANCH_OVERRIDE="$2"
             shift 2
+            ;;
+        --reconfigure)
+            RECONFIGURE=true
+            shift
             ;;
         *)
             INSTANCE_NAME="$1"
@@ -22,10 +31,20 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Get instance name from argument or use current directory name
-if [ -z "$INSTANCE_NAME" ]; then
-    INSTANCE_NAME=$(basename "$(pwd)")
+# Initialize or load configuration
+if [ "$RECONFIGURE" = true ] || ! config_exists; then
+    init_config "$RECONFIGURE"
+else
+    load_config
 fi
+
+# Validate configuration
+if ! validate_config; then
+    exit 1
+fi
+
+# Get instance name from argument or use current directory name
+INSTANCE_NAME=$(get_instance_name "$INSTANCE_NAME")
 
 PROJECT_NAME="claude-${INSTANCE_NAME}"
 CONTAINER_NAME="${PROJECT_NAME}-claude-code-1"
@@ -40,40 +59,55 @@ if [ -n "$GIT_BRANCH_OVERRIDE" ]; then
     ENV_OVERRIDE="-e GIT_BRANCH=$GIT_BRANCH_OVERRIDE"
     echo "📌 Using branch: $GIT_BRANCH_OVERRIDE"
     echo ""
+else
+    # Use branch from config
+    ENV_OVERRIDE="-e GIT_BRANCH=$GIT_BRANCH"
+fi
+
+# Add other environment variables from config
+ENV_OVERRIDE="$ENV_OVERRIDE -e GIT_REPO_URL=$GIT_REPO_URL"
+if [ -n "$GIT_CLONE_DIR" ]; then
+    ENV_OVERRIDE="$ENV_OVERRIDE -e GIT_CLONE_DIR=$GIT_CLONE_DIR"
+fi
+if [ -n "$GITHUB_TOKEN" ]; then
+    ENV_OVERRIDE="$ENV_OVERRIDE -e GITHUB_TOKEN=$GITHUB_TOKEN"
+fi
+if [ -n "$CLAUDE_SKIP_PERMISSIONS" ]; then
+    ENV_OVERRIDE="$ENV_OVERRIDE -e CLAUDE_SKIP_PERMISSIONS=$CLAUDE_SKIP_PERMISSIONS"
 fi
 
 # Check if container already exists and is running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     echo "✓ Container already running"
-    
+
     # Copy Claude instructions if they exist locally
     if [ -f "$HOME/.claude/CLAUDE.md" ]; then
         echo "  Copying Claude instructions..."
-        docker-compose -p "$PROJECT_NAME" exec -T claude-code mkdir -p /home/node/.claude
+        docker-compose -f "$LIB_DIR/docker-compose.yml" -p "$PROJECT_NAME" exec -T claude-code mkdir -p /home/node/.claude
         docker cp "$HOME/.claude/CLAUDE.md" "${CONTAINER_NAME}:/home/node/.claude/CLAUDE.md"
     fi
-    
+
     echo "  Connecting to existing instance..."
     echo ""
-    docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh claude
+    docker-compose -f "$LIB_DIR/docker-compose.yml" -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh claude
 else
     # Check if container exists but is stopped
     if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         echo "✓ Container exists but stopped"
         echo "  Starting existing container..."
-        docker-compose -p "$PROJECT_NAME" start
+        docker-compose -f "$LIB_DIR/docker-compose.yml" -p "$PROJECT_NAME" start
     else
         echo "✓ Creating new container..."
         if [ -n "$ENV_OVERRIDE" ]; then
-            docker-compose -p "$PROJECT_NAME" run -d --name "$CONTAINER_NAME" $ENV_OVERRIDE claude-code tail -f /dev/null
+            docker-compose -f "$LIB_DIR/docker-compose.yml" -p "$PROJECT_NAME" run -d --name "$CONTAINER_NAME" $ENV_OVERRIDE claude-code tail -f /dev/null
         else
-            docker-compose -p "$PROJECT_NAME" up -d
+            docker-compose -f "$LIB_DIR/docker-compose.yml" -p "$PROJECT_NAME" up -d
         fi
     fi
 
     echo ""
     echo "✓ Container started successfully"
-    
+
     # Copy Claude instructions if they exist locally
     if [ -f "$HOME/.claude/CLAUDE.md" ]; then
         echo "  Copying Claude instructions..."
@@ -83,5 +117,5 @@ else
 
     echo "  Launching Claude Code..."
     echo ""
-    docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh claude
+    docker-compose -f "$LIB_DIR/docker-compose.yml" -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh claude
 fi

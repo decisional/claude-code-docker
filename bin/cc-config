@@ -1,0 +1,33 @@
+#!/bin/bash
+# View and manage Claude Code configuration
+# Usage: cc-config [--edit]
+
+set -e
+
+# Source config functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/config-functions.sh"
+
+# Parse arguments
+EDIT_MODE=false
+if [ "$1" = "--edit" ]; then
+    EDIT_MODE=true
+fi
+
+# Check if configuration exists
+if ! config_exists; then
+    echo -e "${YELLOW}⚠${NC} No configuration found in current directory"
+    echo ""
+    echo "Run ${GREEN}cc-init${NC} to initialize a configuration for this project"
+    exit 1
+fi
+
+if [ "$EDIT_MODE" = true ]; then
+    # Edit mode - reconfigure
+    echo "Reconfiguring project..."
+    echo ""
+    init_config true
+else
+    # View mode - show current config
+    show_config
+fi

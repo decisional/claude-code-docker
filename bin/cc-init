@@ -1,0 +1,39 @@
+#!/bin/bash
+# Initialize Claude Code configuration for a project
+# Usage: cc-init [--reconfigure]
+
+set -e
+
+# Source config functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/config-functions.sh"
+
+# Parse arguments
+RECONFIGURE=false
+if [ "$1" = "--reconfigure" ]; then
+    RECONFIGURE=true
+fi
+
+# Check if already configured
+if [ "$RECONFIGURE" != true ] && config_exists; then
+    echo -e "${YELLOW}⚠${NC} Configuration already exists in this directory"
+    echo ""
+
+    if prompt_yes_no "Reconfigure?" "n"; then
+        RECONFIGURE=true
+    else
+        echo ""
+        echo "Configuration unchanged. Use 'cc-config' to view current settings."
+        exit 0
+    fi
+fi
+
+# Initialize configuration
+init_config "$RECONFIGURE"
+
+echo ""
+echo -e "${GREEN}✓ Project initialized!${NC}"
+echo ""
+echo "Next steps:"
+echo "  1. Review configuration: ${GREEN}cc-config${NC}"
+echo "  2. Start Claude Code: ${GREEN}cc-start${NC}"

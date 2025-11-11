@@ -1,6 +1,53 @@
 # Claude Code Docker Environment
 
-A Docker container with Claude Code CLI and Git pre-installed.
+A CLI tool for managing isolated Claude Code Docker instances with per-project configuration.
+
+## Installation
+
+### Homebrew (Recommended)
+
+```bash
+# Install from tap (once the tap is set up)
+brew tap yourusername/claude-code
+brew install claude-code
+
+# Or install directly from the repository (for development)
+brew install --build-from-source formula/claude-code.rb
+
+# Run initial setup
+cc-setup
+```
+
+### Manual Installation (Development)
+
+If you want to run from source without installing via Homebrew:
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/llm-docker.git
+cd llm-docker
+
+# Add bin directory to your PATH (add to ~/.zshrc or ~/.bashrc)
+export PATH="$PWD/bin:$PATH"
+
+# Run initial setup
+bin/cc-setup
+```
+
+## Quick Start
+
+```bash
+# 1. Navigate to your project
+cd /path/to/your/project
+
+# 2. Initialize configuration (auto-detects git repo and branch)
+cc-init
+
+# 3. Start Claude Code
+cc-start
+
+# That's it! Your instance is running and configured.
+```
 
 ## Prerequisites
 
@@ -8,7 +55,7 @@ A Docker container with Claude Code CLI and Git pre-installed.
 - Claude Code installed on macOS (run `claude login` to authenticate)
 - Git configured on your host machine
 
-## Setup
+## Setup (Legacy - for manual installation without Homebrew)
 
 ### Option 1: Build Image with Credentials Baked In (Recommended)
 
@@ -89,41 +136,69 @@ CLAUDE_SKIP_PERMISSIONS=true
 
 ## Usage
 
-### Quick Start Scripts (Recommended)
+### CLI Commands
 
 The easiest way to manage multiple Claude Code instances:
 
 ```bash
+# Initialize project configuration (run once per project)
+cc-init
+
 # Start a new instance (auto-creates from current directory name)
-./cc-start
+cc-start
 
 # Or specify a custom name
-./cc-start my-project
+cc-start my-project
+
+# Override branch for this session
+cc-start --branch feature-branch
+
+# Reconfigure project settings
+cc-start --reconfigure
 
 # Resume/connect to an existing instance
-./cc-exec my-project
+cc-exec my-project
 
 # Open a zsh shell in an instance
-./cc-shell my-project
+cc-shell my-project
+
+# View current project configuration
+cc-config
+
+# Edit project configuration
+cc-config --edit
 
 # List all instances
-./cc-list
+cc-list
 
 # Stop an instance
-./cc-stop my-project
+cc-stop my-project
 
 # Remove an instance
-./cc-rm my-project
+cc-rm my-project
 
 # Remove all stopped instances
-./cc-clean
+cc-clean
+
+# Rebuild Docker image
+cc-build
+cc-build --rebuild  # Force rebuild without cache
+cc-build --version v1.0.0  # Tag with version
 ```
 
 **How it works:**
+- Each project has its own configuration in `.claude-code/config`
+- Configuration is auto-detected from your git repository
 - Each instance gets its own isolated container
 - Instances stay alive in the background (won't die on Ctrl+C)
 - You can run multiple instances simultaneously for different projects
 - Instance names are used as docker-compose project names
+
+**Configuration:**
+- Stored per-project in `.claude-code/config`
+- Auto-detects: git repo URL, current branch, project name
+- Interactive prompts for missing values
+- Can be reconfigured with `cc-config --edit` or `cc-start --reconfigure`
 
 ### If you used build.sh (Credentials Baked In)
 

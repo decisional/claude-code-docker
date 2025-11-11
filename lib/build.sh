@@ -2,10 +2,18 @@
 
 # Build script for Claude Code Docker image
 # Extracts credentials from macOS Keychain and builds them into the image
+# Usage: build.sh [VERSION] [--no-cache]
 
 set -e
 
-echo "Building Claude Code Docker Image..."
+# Parse arguments
+VERSION="${1:-latest}"
+NO_CACHE_FLAG=""
+if [ "$2" = "--no-cache" ]; then
+    NO_CACHE_FLAG="--no-cache"
+fi
+
+echo "Building Claude Code Docker Image (version: $VERSION)..."
 echo "===================================="
 echo ""
 
@@ -117,10 +125,12 @@ echo "✅ Temporary credentials file created"
 # Build Docker image with credentials
 echo ""
 echo "4. Building Docker image..."
-docker build --no-cache \
+docker build $NO_CACHE_FLAG \
     --build-arg USER_ID=${CURRENT_UID} \
     --build-arg GROUP_ID=${CURRENT_GID} \
-    -t llm-docker-claude-code:latest .
+    -t llm-docker-claude-code:${VERSION} \
+    -t llm-docker-claude-code:latest \
+    -f ./lib/Dockerfile .
 
 echo ""
 echo "5. Cleaning up temporary files..."

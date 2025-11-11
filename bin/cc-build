@@ -1,0 +1,47 @@
+#!/bin/bash
+# Build Claude Code Docker image
+# Usage: cc-build [--version VERSION] [--rebuild]
+
+set -e
+
+# Source config functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/config-functions.sh"
+
+# Parse arguments
+VERSION="latest"
+NO_CACHE=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --version)
+            VERSION="$2"
+            shift 2
+            ;;
+        --rebuild)
+            NO_CACHE="--no-cache"
+            shift
+            ;;
+        *)
+            echo "Usage: cc-build [--version VERSION] [--rebuild]"
+            echo ""
+            echo "Options:"
+            echo "  --version VERSION  Tag the image with a specific version (default: latest)"
+            echo "  --rebuild          Force rebuild without using cache"
+            exit 1
+            ;;
+    esac
+done
+
+echo -e "${BLUE}━━━ Building Claude Code Docker Image ━━━${NC}"
+echo ""
+
+# Check if we're in development mode or installed mode
+if [ -f "$LIB_DIR/build.sh" ]; then
+    # Run build script from lib directory
+    cd "$LIB_DIR/.."
+    bash "$LIB_DIR/build.sh" "$VERSION" "$NO_CACHE"
+else
+    echo -e "${RED}✗${NC} Build script not found at $LIB_DIR/build.sh"
+    exit 1
+fi

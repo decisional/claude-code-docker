@@ -1,8 +1,12 @@
 #!/bin/bash
 # Remove all stopped Claude Code instances
-# Usage: ./cc-clean
+# Usage: cc-clean
 
 set -e
+
+# Source config functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/config-functions.sh"
 
 echo "🧹 Cleaning stopped Claude Code instances"
 echo "=========================================="
@@ -45,7 +49,7 @@ while IFS= read -r CONTAINER_NAME; do
     PROJECT_NAME="claude-${INSTANCE_NAME}"
 
     echo "  🗑️  Removing: $INSTANCE_NAME"
-    docker-compose -p "$PROJECT_NAME" down 2>/dev/null || echo "     ⚠️  Warning: Could not remove $INSTANCE_NAME"
+    docker-compose -f "$LIB_DIR/docker-compose.yml" -p "$PROJECT_NAME" down 2>/dev/null || echo "     ⚠️  Warning: Could not remove $INSTANCE_NAME"
 done <<< "$STOPPED_CONTAINERS"
 
 echo ""
