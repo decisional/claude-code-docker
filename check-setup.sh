@@ -79,19 +79,8 @@ fi
 
 echo ""
 
-# Check workspace directory
-echo "3. Checking workspace directory..."
-if [ -d "./workspace" ]; then
-    echo "   ✓ workspace directory exists"
-else
-    echo "   ✗ workspace directory NOT found"
-    echo "   → Run ./setup.sh to create it"
-fi
-
-echo ""
-
 # Check .env file
-echo "4. Checking .env file..."
+echo "3. Checking .env file..."
 if [ -f ".env" ]; then
     echo "   ✓ .env file exists"
 
@@ -111,7 +100,7 @@ fi
 echo ""
 
 # Check Docker
-echo "5. Checking Docker..."
+echo "4. Checking Docker..."
 if command -v docker &> /dev/null; then
     echo "   ✓ Docker installed"
 
@@ -128,7 +117,7 @@ fi
 echo ""
 
 # Check Docker Compose
-echo "6. Checking Docker Compose..."
+echo "5. Checking Docker Compose..."
 if command -v docker-compose &> /dev/null || docker compose version &> /dev/null; then
     echo "   ✓ Docker Compose available"
 else

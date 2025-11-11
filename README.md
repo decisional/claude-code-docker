@@ -53,7 +53,6 @@ If you prefer to manage credentials as mounted volumes:
 # This will:
 # - Copy Git config from ~/.gitconfig to ./git-data/
 # - Copy SSH keys from ~/.ssh/ to ./git-data/
-# - Create workspace directory
 # - Create .env file for git repository configuration
 
 # 2. Authenticate on first run
@@ -199,13 +198,11 @@ cp -r /path/to/dataset ./shared/mydata
 
 # Run container
 docker run -it --rm \
-  -v $(pwd)/workspace:/workspace \
   -e GIT_REPO_URL=https://github.com/user/repo \
   claude-code-docker_claude-code
 
 # Or with bash access
 docker run -it --rm \
-  -v $(pwd)/workspace:/workspace \
   claude-code-docker_claude-code /bin/bash
 ```
 
@@ -218,7 +215,7 @@ docker run -it --rm \
 - Configurable Claude runtime flag (`--dangerously-skip-permissions`)
 - Writable Claude credentials directory (memories and settings persist)
 - Writable Git configuration and SSH keys (git operations persist, can do git clone/push)
-- Persistent workspace directory
+- Isolated workspace per container (enables multi-branch parallel work)
 
 ## Customization
 
@@ -281,9 +278,11 @@ RUN apt-get update && apt-get install -y \
 
 ## Notes
 
-- The `workspace` directory is where your projects should live
+- Each container has an **isolated workspace** at `/workspace`
   - If `GIT_REPO_URL` is set, repositories are auto-cloned here on startup
-  - All changes persist on your host machine
+  - Changes exist only within the container (enables multi-branch parallel work)
+  - Different containers can work on different branches simultaneously
+  - Use git push to persist your work to the remote repository
 - The `claude-data` directory contains a writable copy of your Claude credentials
   - Memories and settings saved in the container will persist here
   - This is a local copy - your original `~/.claude` remains unchanged
