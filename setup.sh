@@ -75,12 +75,6 @@ if [ -d "$SSH_DIR" ]; then
     fi
 fi
 
-# Create workspace directory if it doesn't exist
-if [ ! -d "./workspace" ]; then
-    mkdir -p ./workspace
-    echo "Created workspace directory"
-fi
-
 # Setup .env file for git repository configuration
 echo ""
 echo "Setting up .env file..."

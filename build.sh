@@ -61,12 +61,6 @@ else
     echo "   Option 2: Add GITHUB_TOKEN to .env file (see .env.example)"
 fi
 
-# Create workspace directory if it doesn't exist
-if [ ! -d "./workspace" ]; then
-    mkdir -p ./workspace
-    echo "✅ Created workspace directory"
-fi
-
 # Create shared directory if it doesn't exist
 if [ ! -d "./shared" ]; then
     mkdir -p ./shared

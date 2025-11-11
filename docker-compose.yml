@@ -21,8 +21,6 @@ services:
       # GitHub authentication token (optional, loaded from .env)
       - GITHUB_TOKEN=${GITHUB_TOKEN}
     volumes:
-      # Mount your project directory
-      - ./workspace:/workspace
       # Mount shared directory (read-only, accessible by all instances)
       - ./shared:/shared:ro
       # Mount Claude credentials with write access (for memories and settings)
