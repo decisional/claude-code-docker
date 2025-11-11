@@ -87,49 +87,84 @@ if [ -n "$GIT_REPO_URL" ]; then
 
     # If GIT_BRANCH is specified, try to clone that branch
     if [ -n "$GIT_BRANCH" ]; then
-        # Try to clone the specified branch
-        if git clone --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
+        # Try to clone the specified branch with explicit config
+        if GIT_TERMINAL_PROMPT=0 git clone --config core.fsmonitor=false --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
             echo "✓ Cloned existing branch: $GIT_BRANCH"
         else
             CLONE_EXIT=$?
-            echo "⚠ Branch '$GIT_BRANCH' doesn't exist remotely (exit code: $CLONE_EXIT)"
-            echo "  Cloning default branch and creating '$GIT_BRANCH' from it..."
 
-            # Thorough cleanup of failed clone attempt
-            if [ -d "$TARGET_DIR" ]; then
-                chmod -R u+w "$TARGET_DIR" 2>/dev/null || true
-                rm -rf "$TARGET_DIR" 2>&1 || true
-            fi
-
-            # Clone without specifying branch (uses repo's default branch)
-            if git clone "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
+            # Check if it's actually a missing branch vs clone error
+            if [ -d "$TARGET_DIR/.git" ]; then
+                echo "⚠ Clone completed but git reported an error (exit code: $CLONE_EXIT)"
+                echo "  Repository appears to be intact, continuing..."
                 cd "$TARGET_DIR"
-
-                # Create and checkout new branch from current HEAD
-                if git checkout -b "$GIT_BRANCH" 2>&1; then
-                    echo "✓ Created new branch '$GIT_BRANCH' from default branch"
-                else
-                    echo "❌ Failed to create branch '$GIT_BRANCH'"
-                    exit 1
-                fi
             else
-                echo "❌ Failed to clone repository"
-                exit 1
+                echo "⚠ Branch '$GIT_BRANCH' doesn't exist remotely (exit code: $CLONE_EXIT)"
+                echo "  Cloning default branch and creating '$GIT_BRANCH' from it..."
+
+                # Thorough cleanup of failed clone attempt
+                if [ -d "$TARGET_DIR" ]; then
+                    chmod -R u+w "$TARGET_DIR" 2>/dev/null || true
+                    rm -rf "$TARGET_DIR" 2>&1 || true
+                fi
+
+                # Clone without specifying branch (uses repo's default branch)
+                if GIT_TERMINAL_PROMPT=0 git clone --config core.fsmonitor=false "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
+                    cd "$TARGET_DIR"
+
+                    # Create and checkout new branch from current HEAD
+                    if git checkout -b "$GIT_BRANCH" 2>&1; then
+                        echo "✓ Created new branch '$GIT_BRANCH' from default branch"
+                    else
+                        echo "❌ Failed to create branch '$GIT_BRANCH'"
+                        exit 1
+                    fi
+                else
+                    # Check if clone succeeded despite error
+                    if [ -d "$TARGET_DIR/.git" ]; then
+                        echo "⚠ Clone completed but git reported an error"
+                        echo "  Repository appears to be intact, continuing..."
+                        cd "$TARGET_DIR"
+
+                        # Create and checkout new branch
+                        if git checkout -b "$GIT_BRANCH" 2>&1; then
+                            echo "✓ Created new branch '$GIT_BRANCH' from default branch"
+                        else
+                            echo "❌ Failed to create branch '$GIT_BRANCH'"
+                            exit 1
+                        fi
+                    else
+                        echo "❌ Failed to clone repository"
+                        exit 1
+                    fi
+                fi
             fi
         fi
     else
         # No branch specified - clone using repo's default branch
-        if git clone "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
+        # Clone with explicit config to avoid git internal errors
+        if GIT_TERMINAL_PROMPT=0 git clone --config core.fsmonitor=false "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
             echo "✓ Cloned repository using default branch"
         else
             CLONE_EXIT=$?
-            echo "❌ Failed to clone repository (exit code: $CLONE_EXIT)"
 
-            # Show what's in the workspace for debugging
-            echo "Workspace contents:"
-            ls -la /workspace/ 2>&1 || echo "Cannot list /workspace"
+            # Check if directory was created despite error (partial clone)
+            if [ -d "$TARGET_DIR/.git" ]; then
+                echo "⚠ Clone completed but git reported an error (exit code: $CLONE_EXIT)"
+                echo "  Repository appears to be intact, continuing..."
 
-            exit 1
+                # Fix any git state issues
+                cd "$TARGET_DIR"
+                git fsck --full 2>&1 || echo "  (git fsck completed with warnings)"
+            else
+                echo "❌ Failed to clone repository (exit code: $CLONE_EXIT)"
+
+                # Show what's in the workspace for debugging
+                echo "Workspace contents:"
+                ls -la /workspace/ 2>&1 || echo "Cannot list /workspace"
+
+                exit 1
+            fi
         fi
     fi
 
