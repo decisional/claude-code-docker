@@ -59,33 +59,59 @@ if [ -n "$GIT_REPO_URL" ]; then
     fi
 
     # Always do a fresh clone to ensure clean state
-    # Remove existing directory if it exists
+    # Remove existing directory if it exists with thorough cleanup
     if [ -d "$TARGET_DIR" ]; then
         echo "Removing existing repository at $TARGET_DIR for fresh clone..."
-        rm -rf "$TARGET_DIR"
+        # Force remove with verbose error handling
+        if ! rm -rf "$TARGET_DIR" 2>&1; then
+            echo "⚠ Warning: Failed to remove $TARGET_DIR, retrying with force..."
+            chmod -R u+w "$TARGET_DIR" 2>/dev/null || true
+            rm -rf "$TARGET_DIR" || true
+        fi
+
+        # Verify removal was successful
+        if [ -d "$TARGET_DIR" ]; then
+            echo "❌ Error: Could not remove $TARGET_DIR"
+            exit 1
+        fi
     fi
+
+    # Ensure parent directory exists and is writable
+    mkdir -p "$(dirname "$TARGET_DIR")"
+
+    # Clear any git environment variables that might interfere with cloning
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+    unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES
 
     echo "Cloning repository to $TARGET_DIR..."
 
     # If GIT_BRANCH is specified, try to clone that branch
     if [ -n "$GIT_BRANCH" ]; then
         # Try to clone the specified branch
-        if git clone --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$TARGET_DIR" 2>/dev/null; then
+        if git clone --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
             echo "✓ Cloned existing branch: $GIT_BRANCH"
         else
-            echo "⚠ Branch '$GIT_BRANCH' doesn't exist remotely"
+            CLONE_EXIT=$?
+            echo "⚠ Branch '$GIT_BRANCH' doesn't exist remotely (exit code: $CLONE_EXIT)"
             echo "  Cloning default branch and creating '$GIT_BRANCH' from it..."
 
-            # Remove failed clone attempt if any
-            rm -rf "$TARGET_DIR" 2>/dev/null || true
+            # Thorough cleanup of failed clone attempt
+            if [ -d "$TARGET_DIR" ]; then
+                chmod -R u+w "$TARGET_DIR" 2>/dev/null || true
+                rm -rf "$TARGET_DIR" 2>&1 || true
+            fi
 
             # Clone without specifying branch (uses repo's default branch)
-            if git clone "$GIT_REPO_URL" "$TARGET_DIR"; then
+            if git clone "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
                 cd "$TARGET_DIR"
 
                 # Create and checkout new branch from current HEAD
-                git checkout -b "$GIT_BRANCH"
-                echo "✓ Created new branch '$GIT_BRANCH' from default branch"
+                if git checkout -b "$GIT_BRANCH" 2>&1; then
+                    echo "✓ Created new branch '$GIT_BRANCH' from default branch"
+                else
+                    echo "❌ Failed to create branch '$GIT_BRANCH'"
+                    exit 1
+                fi
             else
                 echo "❌ Failed to clone repository"
                 exit 1
@@ -93,10 +119,16 @@ if [ -n "$GIT_REPO_URL" ]; then
         fi
     else
         # No branch specified - clone using repo's default branch
-        if git clone "$GIT_REPO_URL" "$TARGET_DIR"; then
+        if git clone "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
             echo "✓ Cloned repository using default branch"
         else
-            echo "❌ Failed to clone repository"
+            CLONE_EXIT=$?
+            echo "❌ Failed to clone repository (exit code: $CLONE_EXIT)"
+
+            # Show what's in the workspace for debugging
+            echo "Workspace contents:"
+            ls -la /workspace/ 2>&1 || echo "Cannot list /workspace"
+
             exit 1
         fi
     fi
