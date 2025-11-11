@@ -56,7 +56,9 @@ if [ -d "$GH_CONFIG_DIR" ]; then
     echo "✅ GitHub CLI config copied to $LOCAL_GIT_DIR/.config/gh"
 else
     echo "⚠️  No GitHub CLI config found at $GH_CONFIG_DIR"
-    echo "   Run 'gh auth login' on your host machine to authenticate"
+    echo "   To enable GitHub CLI (for PR creation, etc.):"
+    echo "   Option 1: Run 'gh auth login' on your host, then rebuild"
+    echo "   Option 2: Add GITHUB_TOKEN to .env file (see .env.example)"
 fi
 
 # Create workspace directory if it doesn't exist

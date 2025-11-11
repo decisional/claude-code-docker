@@ -25,6 +25,26 @@ else
     echo "⚠ Warning: Claude credentials directory not found at $CLAUDE_DIR"
 fi
 
+# Authenticate GitHub CLI if token is provided
+echo ""
+if [ -n "$GITHUB_TOKEN" ]; then
+    echo "Authenticating GitHub CLI..."
+    if echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null; then
+        echo "✓ GitHub CLI authenticated successfully"
+        gh auth status
+    else
+        echo "⚠ Warning: Failed to authenticate GitHub CLI with provided token"
+    fi
+elif gh auth status >/dev/null 2>&1; then
+    echo "✓ GitHub CLI already authenticated (using existing config)"
+else
+    echo "⚠ GitHub CLI not authenticated"
+    echo "  To enable PR creation and other GitHub operations:"
+    echo "  1. Create a token at: https://github.com/settings/tokens"
+    echo "  2. Add GITHUB_TOKEN=your_token to your .env file"
+    echo "  3. Rebuild container with: ./cc-start"
+fi
+
 # Check if GIT_REPO_URL is set and workspace is empty
 if [ -n "$GIT_REPO_URL" ]; then
     echo "Git repository configured: $GIT_REPO_URL"

@@ -18,6 +18,8 @@ services:
       - CLAUDE_CONFIG_DIR=/home/node/.claude
       # Claude Code runtime flags (loaded from .env)
       - CLAUDE_SKIP_PERMISSIONS=${CLAUDE_SKIP_PERMISSIONS:-false}
+      # GitHub authentication token (optional, loaded from .env)
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
     volumes:
       # Mount your project directory
       - ./workspace:/workspace
