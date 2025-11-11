@@ -38,8 +38,8 @@ if [ -n "$GIT_REPO_URL" ]; then
         TARGET_DIR="/workspace/$REPO_NAME"
     fi
 
-    # Only clone if the directory doesn't exist
-    if [ ! -d "$TARGET_DIR" ]; then
+    # Only clone if the directory doesn't exist or is empty/invalid
+    if [ ! -d "$TARGET_DIR" ] || [ ! -d "$TARGET_DIR/.git" ] || [ -z "$(ls -A $TARGET_DIR 2>/dev/null | grep -v '^\.git$')" ]; then
         echo "Cloning repository to $TARGET_DIR..."
 
         # Default to main if no branch specified

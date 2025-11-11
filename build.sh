@@ -77,6 +77,25 @@ if [ ! -f ".env" ]; then
     echo "✅ Created .env file from .env.example"
 fi
 
+# Auto-detect and set USER_ID and GROUP_ID in .env
+CURRENT_UID=$(id -u)
+CURRENT_GID=$(id -g)
+
+if grep -q "^USER_ID=" .env; then
+    # Update existing values
+    sed -i.bak "s/^USER_ID=.*/USER_ID=${CURRENT_UID}/" .env
+    sed -i.bak "s/^GROUP_ID=.*/GROUP_ID=${CURRENT_GID}/" .env
+    rm -f .env.bak
+else
+    # Add new values
+    echo "" >> .env
+    echo "# Auto-detected user permissions" >> .env
+    echo "USER_ID=${CURRENT_UID}" >> .env
+    echo "GROUP_ID=${CURRENT_GID}" >> .env
+fi
+
+echo "✅ Set USER_ID=${CURRENT_UID} and GROUP_ID=${CURRENT_GID} in .env"
+
 echo ""
 
 # Extract credentials from macOS Keychain
@@ -102,7 +121,10 @@ echo "✅ Temporary credentials file created"
 # Build Docker image with credentials
 echo ""
 echo "4. Building Docker image..."
-docker build --no-cache -t llm-docker-claude-code:latest .
+docker build --no-cache \
+    --build-arg USER_ID=${CURRENT_UID} \
+    --build-arg GROUP_ID=${CURRENT_GID} \
+    -t llm-docker-claude-code:latest .
 
 echo ""
 echo "5. Cleaning up temporary files..."

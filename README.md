@@ -28,6 +28,7 @@ docker-compose run --rm claude-code
 **How it works:**
 - `build.sh` extracts your OAuth credentials from macOS Keychain
 - Copies Git config, SSH keys, and GitHub CLI config to ./git-data/
+- Auto-detects your user ID/group ID and sets it in .env for proper file permissions
 - Credentials are copied into the Docker image during build
 - Every container from this image is pre-authenticated
 - Rebuild when credentials expire or you want to update
@@ -292,12 +293,16 @@ RUN apt-get update && apt-get install -y \
   - SSH keys are copied with proper permissions (600/700)
   - Git credentials and config persist across container restarts
   - Your original `~/.gitconfig` and `~/.ssh` remain unchanged
-  - Re-run `./setup.sh` if you need to refresh from your host system
+  - Re-run `./build.sh` if you need to refresh from your host system
 - Configure automatic git cloning in `.env` file
   - Leave `GIT_REPO_URL` empty to skip auto-cloning
   - Repository is only cloned once (won't overwrite existing directories)
 - You must run `claude login` on your host machine before running setup
-- The container runs as root by default (consider adding a non-root user for production use)
+- **File permissions are automatically handled:**
+  - `build.sh` detects your user ID and group ID
+  - Container runs as your user, not root
+  - Files created in mounted volumes have proper ownership
+  - Works across different systems (macOS, Linux) without manual configuration
 
 ## Troubleshooting
 
@@ -353,14 +358,40 @@ This happens if the credentials aren't being persisted properly. To fix:
 
 ### Git clone fails with permission denied
 
-Check that your SSH keys are properly copied:
+**Problem:** Git operations fail with "Permission denied (publickey)" or similar errors.
 
-```bash
-ls -la ./git-data/.ssh/
-# Should show your keys with proper permissions (600)
-```
+**Solution:**
 
-If keys are missing, re-run `./setup.sh`
+1. **Check SSH keys are copied:**
+   ```bash
+   ls -la ./git-data/.ssh/
+   # Should show your keys (id_rsa, id_ed25519, etc.) with permissions 600
+   ```
+
+2. **If keys are missing, re-run build:**
+   ```bash
+   ./build.sh
+   ```
+
+3. **Check your host SSH keys exist:**
+   ```bash
+   ls -la ~/.ssh/
+   # You should have id_rsa or id_ed25519 files
+   ```
+
+4. **If you don't have SSH keys, create them:**
+   ```bash
+   ssh-keygen -t ed25519 -C "your.email@example.com"
+   # Add the public key to GitHub: https://github.com/settings/keys
+   ```
+
+5. **For GitHub CLI authentication:**
+   ```bash
+   # On your host machine
+   gh auth login
+   # Then rebuild
+   ./build.sh
+   ```
 
 ### Container can't find git repository
 
