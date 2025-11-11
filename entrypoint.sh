@@ -67,26 +67,34 @@ if [ -n "$GIT_REPO_URL" ]; then
 
     echo "Cloning repository to $TARGET_DIR..."
 
-    # Default to main if no branch specified
-    BRANCH="${GIT_BRANCH:-main}"
+    # If GIT_BRANCH is specified, try to clone that branch
+    if [ -n "$GIT_BRANCH" ]; then
+        # Try to clone the specified branch
+        if git clone --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$TARGET_DIR" 2>/dev/null; then
+            echo "✓ Cloned existing branch: $GIT_BRANCH"
+        else
+            echo "⚠ Branch '$GIT_BRANCH' doesn't exist remotely"
+            echo "  Cloning default branch and creating '$GIT_BRANCH' from it..."
 
-    # Try to clone with the specified branch
-    if git clone --branch "$BRANCH" "$GIT_REPO_URL" "$TARGET_DIR" 2>/dev/null; then
-        echo "✓ Cloned existing branch: $BRANCH"
+            # Remove failed clone attempt if any
+            rm -rf "$TARGET_DIR" 2>/dev/null || true
+
+            # Clone without specifying branch (uses repo's default branch)
+            if git clone "$GIT_REPO_URL" "$TARGET_DIR"; then
+                cd "$TARGET_DIR"
+
+                # Create and checkout new branch from current HEAD
+                git checkout -b "$GIT_BRANCH"
+                echo "✓ Created new branch '$GIT_BRANCH' from default branch"
+            else
+                echo "❌ Failed to clone repository"
+                exit 1
+            fi
+        fi
     else
-        echo "⚠ Branch '$BRANCH' doesn't exist remotely"
-        echo "  Cloning default branch and creating '$BRANCH' from it..."
-
-        # Remove failed clone attempt if any
-        rm -rf "$TARGET_DIR" 2>/dev/null || true
-
-        # Clone without specifying branch (uses default branch)
+        # No branch specified - clone using repo's default branch
         if git clone "$GIT_REPO_URL" "$TARGET_DIR"; then
-            cd "$TARGET_DIR"
-
-            # Create and checkout new branch from current HEAD
-            git checkout -b "$BRANCH"
-            echo "✓ Created new branch '$BRANCH' from default branch"
+            echo "✓ Cloned repository using default branch"
         else
             echo "❌ Failed to clone repository"
             exit 1
