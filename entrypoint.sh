@@ -58,38 +58,43 @@ if [ -n "$GIT_REPO_URL" ]; then
         TARGET_DIR="/workspace/$REPO_NAME"
     fi
 
-    # Only clone if the directory doesn't exist or is empty/invalid
-    if [ ! -d "$TARGET_DIR" ] || [ ! -d "$TARGET_DIR/.git" ] || [ -z "$(ls -A $TARGET_DIR 2>/dev/null | grep -v '^\.git$')" ]; then
-        echo "Cloning repository to $TARGET_DIR..."
+    # Always do a fresh clone to ensure clean state
+    # Remove existing directory if it exists
+    if [ -d "$TARGET_DIR" ]; then
+        echo "Removing existing repository at $TARGET_DIR for fresh clone..."
+        rm -rf "$TARGET_DIR"
+    fi
 
-        # Default to main if no branch specified
-        BRANCH="${GIT_BRANCH:-main}"
+    echo "Cloning repository to $TARGET_DIR..."
 
-        # Try to clone with the specified branch
-        if git clone --branch "$BRANCH" "$GIT_REPO_URL" "$TARGET_DIR" 2>/dev/null; then
-            echo "✓ Cloned existing branch: $BRANCH"
-        else
-            echo "⚠ Branch '$BRANCH' doesn't exist remotely"
-            echo "  Cloning main and creating branch '$BRANCH' from it..."
+    # Default to main if no branch specified
+    BRANCH="${GIT_BRANCH:-main}"
 
-            # Clone main branch
-            git clone --branch main "$GIT_REPO_URL" "$TARGET_DIR"
+    # Try to clone with the specified branch
+    if git clone --branch "$BRANCH" "$GIT_REPO_URL" "$TARGET_DIR" 2>/dev/null; then
+        echo "✓ Cloned existing branch: $BRANCH"
+    else
+        echo "⚠ Branch '$BRANCH' doesn't exist remotely"
+        echo "  Cloning default branch and creating '$BRANCH' from it..."
+
+        # Remove failed clone attempt if any
+        rm -rf "$TARGET_DIR" 2>/dev/null || true
+
+        # Clone without specifying branch (uses default branch)
+        if git clone "$GIT_REPO_URL" "$TARGET_DIR"; then
             cd "$TARGET_DIR"
 
-            # Pull latest from main
-            git pull origin main
-
-            # Create and checkout new branch from main
+            # Create and checkout new branch from current HEAD
             git checkout -b "$BRANCH"
-            echo "✓ Created new branch '$BRANCH' from latest main"
+            echo "✓ Created new branch '$BRANCH' from default branch"
+        else
+            echo "❌ Failed to clone repository"
+            exit 1
         fi
-
-        echo "Repository cloned successfully!"
-        cd "$TARGET_DIR"
-    else
-        echo "Repository already exists at $TARGET_DIR"
-        cd "$TARGET_DIR"
     fi
+
+    echo "✓ Repository cloned successfully!"
+    cd "$TARGET_DIR"
 else
     echo "No git repository configured (GIT_REPO_URL not set)"
 fi
