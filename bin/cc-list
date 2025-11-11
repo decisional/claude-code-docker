@@ -1,6 +1,6 @@
 #!/bin/bash
 # List all Claude Code instances
-# Usage: ./cc-list
+# Usage: cc-list
 
 echo "📋 Claude Code Instances"
 echo "========================"
@@ -10,7 +10,7 @@ echo ""
 if ! docker ps -a --filter "name=claude-" --format "{{.Names}}" | grep -q .; then
     echo "No Claude Code instances found."
     echo ""
-    echo "Create one with: ./cc-start [instance-name]"
+    echo "Create one with: cc-start [instance-name]"
     exit 0
 fi
 
@@ -23,9 +23,11 @@ docker ps -a --filter "name=claude-" --filter "status=exited" --format "  ○ {{
 
 echo ""
 echo "Commands:"
-echo "  ./cc-start [name]  - Start/create instance"
-echo "  ./cc-exec [name]   - Connect to instance"
-echo "  ./cc-shell [name]  - Open zsh shell in instance"
-echo "  ./cc-stop [name]   - Stop instance"
-echo "  ./cc-rm [name]     - Remove instance"
-echo "  ./cc-clean         - Remove all stopped instances"
+echo "  cc-start [name]    - Start/create instance"
+echo "  cc-exec [name]     - Connect to instance"
+echo "  cc-shell [name]    - Open zsh shell in instance"
+echo "  cc-stop [name]     - Stop instance"
+echo "  cc-rm [name]       - Remove instance"
+echo "  cc-clean           - Remove all stopped instances"
+echo "  cc-init            - Initialize project configuration"
+echo "  cc-config          - View/edit configuration"

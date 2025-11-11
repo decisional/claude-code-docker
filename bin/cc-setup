@@ -1,0 +1,79 @@
+#!/bin/bash
+# Setup Claude Code - Extract credentials and build Docker image
+# This should be run once after installing via Homebrew
+# Usage: cc-setup [--rebuild]
+
+set -e
+
+# Source config functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/config-functions.sh"
+
+# Parse arguments
+REBUILD=false
+if [ "$1" = "--rebuild" ]; then
+    REBUILD=true
+fi
+
+echo -e "${BLUE}━━━ Claude Code Setup ━━━${NC}"
+echo ""
+
+# Check if Docker is installed
+if ! command -v docker &> /dev/null; then
+    echo -e "${RED}✗${NC} Docker is not installed"
+    echo "Please install Docker Desktop: https://www.docker.com/products/docker-desktop"
+    exit 1
+fi
+
+# Check if Docker is running
+if ! docker info &> /dev/null; then
+    echo -e "${RED}✗${NC} Docker is not running"
+    echo "Please start Docker Desktop and try again"
+    exit 1
+fi
+
+echo -e "${GREEN}✓${NC} Docker is installed and running"
+echo ""
+
+# Check if image already exists
+if docker images llm-docker-claude-code:latest -q | grep -q . && [ "$REBUILD" != true ]; then
+    echo -e "${GREEN}✓${NC} Claude Code Docker image already exists"
+    echo ""
+    echo "To rebuild the image, run: ${GREEN}cc-setup --rebuild${NC}"
+    exit 0
+fi
+
+# Check if Claude is installed and authenticated
+if ! command -v claude &> /dev/null; then
+    echo -e "${RED}✗${NC} Claude CLI is not installed"
+    echo "Please install it first: npm install -g @anthropic-ai/claude-code"
+    exit 1
+fi
+
+echo -e "${GREEN}✓${NC} Claude CLI is installed"
+echo ""
+
+# Build the Docker image
+echo "Building Docker image..."
+echo "This may take a few minutes on first run..."
+echo ""
+
+# Run the build script
+if [ -f "$LIB_DIR/build.sh" ]; then
+    cd "$LIB_DIR/.."
+    bash "$LIB_DIR/build.sh" "latest" "--no-cache"
+else
+    echo -e "${RED}✗${NC} Build script not found at $LIB_DIR/build.sh"
+    exit 1
+fi
+
+echo ""
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}✓ Setup complete!${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo "Next steps:"
+echo "  1. Navigate to a project directory"
+echo "  2. Run ${GREEN}cc-init${NC} to configure the project"
+echo "  3. Run ${GREEN}cc-start${NC} to start Claude Code"
+echo ""

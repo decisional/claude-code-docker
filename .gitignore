@@ -4,6 +4,7 @@ shared/
 claude-data/
 git-data/
 .claude/
+.claude-code/
 
 # Environment and build files
 .env
