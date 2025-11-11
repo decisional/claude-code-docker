@@ -55,7 +55,7 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     
     echo "  Connecting to existing instance..."
     echo ""
-    docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh claude
+    docker-compose -p "$PROJECT_NAME" exec -it claude-code /entrypoint.sh claude
 else
     # Check if container exists but is stopped
     if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
