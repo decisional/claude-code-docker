@@ -114,6 +114,9 @@ The easiest way to manage multiple Claude Code instances:
 
 # Remove an instance
 ./cc-rm my-project
+
+# Remove all stopped instances
+./cc-clean
 ```
 
 **How it works:**
