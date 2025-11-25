@@ -212,8 +212,9 @@ docker run -it --rm \
 ## Features
 
 - Node.js 20
-- Claude Code CLI
+- Claude Code CLI (v2.0.53 - pinned for stability and reproducibility)
 - Git
+- GitHub CLI (v2.40.0)
 - Automatic git repository cloning (optional, configured via .env)
 - Configurable Claude runtime flag (`--dangerously-skip-permissions`)
 - Writable Claude credentials directory (memories and settings persist)
@@ -307,6 +308,31 @@ RUN apt-get update && apt-get install -y \
   - Works across different systems (macOS, Linux) without manual configuration
 
 ## Troubleshooting
+
+### Updating Claude Code to a newer version
+
+The Docker image uses a pinned version of Claude Code for stability. To update to a newer version:
+
+```bash
+# 1. Check the latest version available on npm
+npm view @anthropic-ai/claude-code version
+
+# 2. Update the version in Dockerfile (line 23)
+# Change: RUN npm install -g @anthropic-ai/claude-code@2.0.53
+# To:     RUN npm install -g @anthropic-ai/claude-code@<new-version>
+
+# 3. Rebuild the Docker image
+./build.sh
+
+# 4. Restart your containers with the new image
+./cc-stop <instance-name>
+./cc-start <instance-name>
+```
+
+**Why version pinning?**
+- Ensures consistent behavior across rebuilds
+- Prevents unexpected breaking changes from auto-updates
+- Makes deployments reproducible and debuggable
 
 ### Error: "not a directory" when mounting .gitconfig
 
