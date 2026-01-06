@@ -20,7 +20,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
     rm gh_2.40.0_linux_${ARCH}.deb
 
 # Install Claude Code CLI globally (pinned to latest stable version)
-RUN npm install -g @anthropic-ai/claude-code@2.0.53
+RUN npm install -g @anthropic-ai/claude-code@2.0.76
 
 # Modify the existing node user to match host UID/GID
 # Handle case where GID already exists by using existing group or creating new one
