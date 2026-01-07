@@ -19,6 +19,18 @@ RUN ARCH=$(dpkg --print-architecture) && \
     dpkg -i gh_2.40.0_linux_${ARCH}.deb && \
     rm gh_2.40.0_linux_${ARCH}.deb
 
+# Install Go (detect architecture)
+RUN ARCH=$(dpkg --print-architecture) && \
+    GO_ARCH=$(case ${ARCH} in amd64) echo "amd64" ;; arm64) echo "arm64" ;; *) echo "amd64" ;; esac) && \
+    wget https://go.dev/dl/go1.23.5.linux-${GO_ARCH}.tar.gz && \
+    tar -C /usr/local -xzf go1.23.5.linux-${GO_ARCH}.tar.gz && \
+    rm go1.23.5.linux-${GO_ARCH}.tar.gz
+
+# Set up Go environment variables
+ENV PATH="/usr/local/go/bin:${PATH}" \
+    GOPATH="/home/node/go" \
+    GOBIN="/home/node/go/bin"
+
 # Install Claude Code CLI globally (pinned to latest stable version)
 RUN npm install -g @anthropic-ai/claude-code@2.0.76
 
@@ -34,8 +46,8 @@ RUN if getent group ${GROUP_ID} > /dev/null 2>&1; then \
     chown -R ${USER_ID}:${GROUP_ID} /home/node
 
 # Create directories and set permissions
-RUN mkdir -p /home/node/.claude /workspace && \
-    chown -R node:node /home/node/.claude /workspace
+RUN mkdir -p /home/node/.claude /workspace /home/node/go/bin && \
+    chown -R node:node /home/node/.claude /workspace /home/node/go
 
 # Copy credentials from build context
 # This file is created by build.sh from macOS Keychain
@@ -59,7 +71,8 @@ RUN chmod +x /entrypoint.sh
 
 # Environment variables for Claude Code flags
 ENV CLAUDE_SKIP_PERMISSIONS="" \
-    HOME=/home/node
+    HOME=/home/node \
+    PATH="/home/node/go/bin:/usr/local/go/bin:${PATH}"
 
 # Switch to non-root user (use existing 'node' user)
 USER node
