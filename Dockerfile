@@ -11,7 +11,14 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     zsh \
     wget \
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Poetry
+RUN curl -sSL https://install.python-poetry.org | python3 - && \
+    ln -s /root/.local/bin/poetry /usr/local/bin/poetry
 
 # Install GitHub CLI (detect architecture)
 RUN ARCH=$(dpkg --print-architecture) && \
@@ -32,7 +39,7 @@ ENV PATH="/usr/local/go/bin:${PATH}" \
     GOBIN="/home/node/go/bin"
 
 # Install Claude Code CLI globally (pinned to latest stable version)
-RUN npm install -g @anthropic-ai/claude-code@2.0.76
+RUN npm install -g @anthropic-ai/claude-code@2.1.1
 
 # Modify the existing node user to match host UID/GID
 # Handle case where GID already exists by using existing group or creating new one
