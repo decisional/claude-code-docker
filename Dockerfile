@@ -14,7 +14,14 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
+    python3-psycopg2 \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Create a default virtual environment for pip installs
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir psycopg2-binary requests
 
 # Install Poetry
 RUN curl -sSL https://install.python-poetry.org | python3 - && \
@@ -79,7 +86,7 @@ RUN chmod +x /entrypoint.sh
 # Environment variables for Claude Code flags
 ENV CLAUDE_SKIP_PERMISSIONS="" \
     HOME=/home/node \
-    PATH="/home/node/go/bin:/usr/local/go/bin:${PATH}"
+    PATH="/opt/venv/bin:/home/node/go/bin:/usr/local/go/bin:${PATH}"
 
 # Switch to non-root user (use existing 'node' user)
 USER node
