@@ -2,6 +2,7 @@
 workspace/
 shared/
 claude-data/
+codex-data/
 git-data/
 .claude/
 
