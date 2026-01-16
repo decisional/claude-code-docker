@@ -24,6 +24,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       # GitHub authentication token (optional, loaded from .env)
       - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - CODEX_APPROVAL_POLICY=yolo
     volumes:
       # Mount shared directory (read-only, accessible by all instances)
       - ./shared:/shared:ro

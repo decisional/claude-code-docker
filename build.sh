@@ -72,6 +72,14 @@ if [ ! -d "./codex-data" ]; then
     echo "✅ Created codex-data directory"
 fi
 
+# Copy Codex credentials to codex-data if they exist
+if [ -f "$HOME/.codex/auth.json" ]; then
+    cp "$HOME/.codex/auth.json" ./codex-data/
+    chmod 600 ./codex-data/auth.json
+    [ -f "$HOME/.codex/config.toml" ] && cp "$HOME/.codex/config.toml" ./codex-data/
+    echo "✅ Codex credentials copied to codex-data"
+fi
+
 # Setup .env file if it doesn't exist
 if [ ! -f ".env" ]; then
     cp .env.example .env

@@ -49,24 +49,19 @@ else
     fi
 fi
 
-# Authenticate GitHub CLI if token is provided
+# Check GitHub CLI authentication
 echo ""
 if [ -n "$GITHUB_TOKEN" ]; then
-    echo "Authenticating GitHub CLI..."
-    if echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null; then
-        echo "✓ GitHub CLI authenticated successfully"
-        gh auth status
+    if gh auth status >/dev/null 2>&1; then
+        echo "✓ GitHub CLI authenticated via GITHUB_TOKEN"
     else
-        echo "⚠ Warning: Failed to authenticate GitHub CLI with provided token"
+        echo "⚠ GITHUB_TOKEN set but invalid"
     fi
 elif gh auth status >/dev/null 2>&1; then
-    echo "✓ GitHub CLI already authenticated (using existing config)"
+    echo "✓ GitHub CLI authenticated (using existing config)"
 else
     echo "⚠ GitHub CLI not authenticated"
-    echo "  To enable PR creation and other GitHub operations:"
-    echo "  1. Create a token at: https://github.com/settings/tokens"
-    echo "  2. Add GITHUB_TOKEN=your_token to your .env file"
-    echo "  3. Rebuild container with: ./cc-start"
+    echo "  To enable PR creation: add GITHUB_TOKEN to .env file"
 fi
 
 # Check if GIT_REPO_URL is set and workspace is empty
