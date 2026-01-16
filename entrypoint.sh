@@ -174,6 +174,22 @@ if [ -n "$GIT_REPO_URL" ]; then
 
     echo "✓ Repository cloned successfully!"
     cd "$TARGET_DIR"
+
+    # Auto-install Python dependencies if pyproject.toml exists
+    if [ -f "pyproject.toml" ]; then
+        echo ""
+        echo "📦 Found pyproject.toml - installing Python dependencies..."
+        poetry install --no-interaction 2>&1 || echo "⚠ Poetry install had warnings (continuing anyway)"
+        echo "✓ Python dependencies installed via Poetry"
+    fi
+
+    # Auto-install Go dependencies if go.mod exists
+    if [ -f "go.mod" ]; then
+        echo ""
+        echo "📦 Found go.mod - installing Go dependencies..."
+        go mod download 2>&1 || echo "⚠ go mod download had warnings (continuing anyway)"
+        echo "✓ Go dependencies installed"
+    fi
 else
     echo "No git repository configured (GIT_REPO_URL not set)"
 fi

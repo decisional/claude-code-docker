@@ -23,9 +23,13 @@ RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir psycopg2-binary requests
 
-# Install Poetry
+# Install Poetry for all users
+ENV POETRY_HOME="/opt/poetry"
+ENV PATH="/opt/poetry/bin:$PATH"
 RUN curl -sSL https://install.python-poetry.org | python3 - && \
-    ln -s /root/.local/bin/poetry /usr/local/bin/poetry
+    chmod -R a+rx /opt/poetry && \
+    ln -s /opt/poetry/bin/poetry /usr/local/bin/poetry && \
+    poetry config virtualenvs.in-project true
 
 # Install GitHub CLI (detect architecture)
 RUN ARCH=$(dpkg --print-architecture) && \
