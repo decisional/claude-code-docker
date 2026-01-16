@@ -1,12 +1,22 @@
-# Claude Code Docker Environment
+# LLM CLI Docker Environment
 
-A Docker container with Claude Code CLI and Git pre-installed.
+A Docker container with Claude Code CLI, OpenAI Codex CLI, and Git pre-installed. Run either Claude Code or Codex in isolated containers with full GitHub integration.
 
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Claude Code installed on macOS (run `claude login` to authenticate)
 - Git configured on your host machine
+- **For Claude Code**: Claude Code installed on macOS (run `claude login` to authenticate)
+- **For Codex CLI**: OpenAI API key (get from https://platform.openai.com/api-keys)
+
+## Choosing Between Claude Code and Codex CLI
+
+This environment supports both Claude Code and OpenAI Codex CLI. You can run instances of either, or both simultaneously:
+
+- **Claude Code instances**: Use `./cc-start`, `./cc-exec`, `./cc-list`, etc.
+- **Codex CLI instances**: Use `./codex-start`, `./codex-exec`, `./codex-list`, etc.
+
+Both share the same Git configuration, SSH keys, and GitHub CLI setup, so all GitHub operations (clone, push, PR creation) work identically for both.
 
 ## Setup
 
@@ -87,9 +97,22 @@ CLAUDE_SKIP_PERMISSIONS=true
 - Recommended only for sandboxes with no internet access
 - Use only in trusted Docker container environments where you want full automation
 
+### Configure OpenAI Codex CLI (Optional)
+
+To use Codex CLI instead of Claude Code, add your OpenAI API key to `.env`:
+
+```bash
+# .env
+OPENAI_API_KEY=sk-your_openai_api_key_here
+```
+
+You can get an API key from https://platform.openai.com/api-keys
+
 ## Usage
 
 ### Quick Start Scripts (Recommended)
+
+#### Claude Code Instances
 
 The easiest way to manage multiple Claude Code instances:
 
@@ -119,10 +142,41 @@ The easiest way to manage multiple Claude Code instances:
 ./cc-clean
 ```
 
+#### Codex CLI Instances
+
+Manage Codex CLI instances with the same commands, just use `codex-` prefix:
+
+```bash
+# Start a new Codex instance
+./codex-start
+
+# Or specify a custom name
+./codex-start my-project
+
+# Resume/connect to an existing instance
+./codex-exec my-project
+
+# Open a zsh shell in an instance
+./codex-shell my-project
+
+# List all Codex instances
+./codex-list
+
+# Stop an instance
+./codex-stop my-project
+
+# Remove an instance
+./codex-rm my-project
+
+# Remove all stopped Codex instances
+./codex-clean
+```
+
 **How it works:**
 - Each instance gets its own isolated container
 - Instances stay alive in the background (won't die on Ctrl+C)
 - You can run multiple instances simultaneously for different projects
+- Claude Code and Codex CLI instances are separate - you can run both at the same time
 - Instance names are used as docker-compose project names
 
 ### If you used build.sh (Credentials Baked In)
@@ -212,14 +266,19 @@ docker run -it --rm \
 ## Features
 
 - Node.js 20
-- Claude Code CLI (v2.0.53 - pinned for stability and reproducibility)
+- Claude Code CLI (v2.1.1 - pinned for stability and reproducibility)
+- OpenAI Codex CLI (latest version)
+- Python 3 with pip, venv, Poetry, and common packages (psycopg2-binary, requests)
+- Go 1.23.5
 - Git
 - GitHub CLI (v2.40.0)
 - Automatic git repository cloning (optional, configured via .env)
 - Configurable Claude runtime flag (`--dangerously-skip-permissions`)
-- Writable Claude credentials directory (memories and settings persist)
+- Support for OpenAI API key configuration
+- Writable credentials directories (memories and settings persist)
 - Writable Git configuration and SSH keys (git operations persist, can do git clone/push)
 - Isolated workspace per container (enables multi-branch parallel work)
+- Run multiple Claude Code and Codex CLI instances simultaneously
 
 ## Customization
 

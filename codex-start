@@ -1,0 +1,82 @@
+#!/bin/bash
+# Start a new Codex CLI instance or attach to existing one
+# Usage: ./codex-start [instance-name] [--branch branch-name]
+# If no name provided, uses current directory name
+
+set -e
+
+# Parse arguments
+INSTANCE_NAME=""
+GIT_BRANCH_OVERRIDE=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --branch)
+            GIT_BRANCH_OVERRIDE="$2"
+            shift 2
+            ;;
+        *)
+            INSTANCE_NAME="$1"
+            shift
+            ;;
+    esac
+done
+
+# Get instance name from argument or use current directory name
+if [ -z "$INSTANCE_NAME" ]; then
+    INSTANCE_NAME=$(basename "$(pwd)")
+fi
+
+PROJECT_NAME="codex-${INSTANCE_NAME}"
+CONTAINER_NAME="${PROJECT_NAME}-claude-code-1"
+
+echo "🚀 Starting Codex CLI instance: $INSTANCE_NAME"
+echo "   Project: $PROJECT_NAME"
+echo ""
+
+# Build environment override for branch if specified
+ENV_OVERRIDE="-e LLM_TYPE=codex"
+if [ -n "$GIT_BRANCH_OVERRIDE" ]; then
+    ENV_OVERRIDE="$ENV_OVERRIDE -e GIT_BRANCH=$GIT_BRANCH_OVERRIDE"
+    echo "📌 Using branch: $GIT_BRANCH_OVERRIDE"
+    echo ""
+fi
+
+# Check if container already exists and is running
+if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+    echo "✓ Container already running"
+
+    # Copy OpenAI config if it exists locally
+    if [ -d "$HOME/.openai" ]; then
+        echo "  Copying OpenAI configuration..."
+        docker cp "$HOME/.openai" "${CONTAINER_NAME}:/home/node/.openai" 2>/dev/null || true
+    fi
+
+    echo "  Connecting to existing instance..."
+    echo ""
+    docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh codex
+else
+    # Check if container exists but is stopped
+    if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+        echo "✓ Container exists but stopped"
+        echo "  Starting existing container..."
+        docker-compose -p "$PROJECT_NAME" start
+    else
+        echo "✓ Creating new container..."
+        docker-compose -p "$PROJECT_NAME" run -d --name "$CONTAINER_NAME" $ENV_OVERRIDE claude-code tail -f /dev/null
+    fi
+
+    echo ""
+    echo "✓ Container started successfully"
+
+    # Copy OpenAI config if it exists locally
+    if [ -d "$HOME/.openai" ]; then
+        echo "  Copying OpenAI configuration..."
+        sleep 1  # Wait for container to be fully ready
+        docker cp "$HOME/.openai" "${CONTAINER_NAME}:/home/node/.openai" 2>/dev/null || echo "  (Could not copy OpenAI config, continuing anyway...)"
+    fi
+
+    echo "  Launching Codex CLI..."
+    echo ""
+    docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh codex
+fi

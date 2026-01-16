@@ -8,16 +8,20 @@ services:
     env_file:
       - .env
     environment:
+      # LLM CLI selection (claude or codex)
+      - LLM_TYPE=${LLM_TYPE:-claude}
       # Git repository configuration (loaded from .env)
       - GIT_REPO_URL=${GIT_REPO_URL}
       - GIT_BRANCH=${GIT_BRANCH}
       - GIT_CLONE_DIR=${GIT_CLONE_DIR}
-      # Set HOME to ensure Claude Code uses /home/node/.claude
+      # Set HOME to ensure CLI uses /home/node/.claude or /home/node/.openai
       - HOME=/home/node
       # Claude Code configuration directory
       - CLAUDE_CONFIG_DIR=/home/node/.claude
       # Claude Code runtime flags (loaded from .env)
       - CLAUDE_SKIP_PERMISSIONS=${CLAUDE_SKIP_PERMISSIONS:-false}
+      # OpenAI API Key for Codex CLI (optional, loaded from .env)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       # GitHub authentication token (optional, loaded from .env)
       - GITHUB_TOKEN=${GITHUB_TOKEN}
     volumes:
@@ -25,6 +29,8 @@ services:
       - ./shared:/shared:ro
       # Mount Claude credentials with write access (for memories and settings)
       - ./claude-data:/home/node/.claude
+      # Mount Codex credentials with write access (for sessions and settings)
+      - ./codex-data:/home/node/.codex
       # Mount Git config with write access (for git operations and storage)
       - ./git-data/.gitconfig:/home/node/.gitconfig
       # Mount SSH keys with write access (for git clone/push operations)

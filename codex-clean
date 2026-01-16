@@ -1,0 +1,52 @@
+#!/bin/bash
+# Remove all stopped Codex CLI instances
+# Usage: ./codex-clean
+
+set -e
+
+echo "🧹 Cleaning stopped Codex CLI instances"
+echo "========================================"
+echo ""
+
+# Get all stopped instances
+STOPPED_CONTAINERS=$(docker ps -a --filter "name=codex-" --filter "status=exited" --format "{{.Names}}")
+
+# Check if there are any stopped containers
+if [ -z "$STOPPED_CONTAINERS" ]; then
+    echo "✓ No stopped instances found. Nothing to clean."
+    exit 0
+fi
+
+# Count stopped instances
+INSTANCE_COUNT=$(echo "$STOPPED_CONTAINERS" | wc -l | tr -d ' ')
+echo "Found $INSTANCE_COUNT stopped instance(s):"
+echo ""
+
+# List stopped instances
+echo "$STOPPED_CONTAINERS" | sed 's/-claude-code-1//' | sed 's/codex-//' | awk '{print "  ○ " $0}'
+echo ""
+
+# Ask for confirmation
+read -p "Remove all stopped instances? (y/N): " CONFIRM
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    echo "❌ Cancelled"
+    exit 0
+fi
+
+echo ""
+echo "Removing stopped instances..."
+echo ""
+
+# Remove each stopped instance
+while IFS= read -r CONTAINER_NAME; do
+    # Extract instance name from container name
+    # codex-my-project-claude-code-1 -> my-project
+    INSTANCE_NAME=$(echo "$CONTAINER_NAME" | sed 's/^codex-//' | sed 's/-claude-code-1$//')
+    PROJECT_NAME="codex-${INSTANCE_NAME}"
+
+    echo "  🗑️  Removing: $INSTANCE_NAME"
+    docker-compose -p "$PROJECT_NAME" down 2>/dev/null || echo "     ⚠️  Warning: Could not remove $INSTANCE_NAME"
+done <<< "$STOPPED_CONTAINERS"
+
+echo ""
+echo "✓ Cleanup complete!"

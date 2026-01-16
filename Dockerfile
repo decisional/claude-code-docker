@@ -48,6 +48,9 @@ ENV PATH="/usr/local/go/bin:${PATH}" \
 # Install Claude Code CLI globally (pinned to latest stable version)
 RUN npm install -g @anthropic-ai/claude-code@2.1.1
 
+# Install OpenAI Codex CLI globally
+RUN npm install -g @openai/codex
+
 # Modify the existing node user to match host UID/GID
 # Handle case where GID already exists by using existing group or creating new one
 RUN if getent group ${GROUP_ID} > /dev/null 2>&1; then \
@@ -60,15 +63,24 @@ RUN if getent group ${GROUP_ID} > /dev/null 2>&1; then \
     chown -R ${USER_ID}:${GROUP_ID} /home/node
 
 # Create directories and set permissions
-RUN mkdir -p /home/node/.claude /workspace /home/node/go/bin && \
-    chown -R node:node /home/node/.claude /workspace /home/node/go
+RUN mkdir -p /home/node/.claude /home/node/.codex /workspace /home/node/go/bin && \
+    chown -R node:node /home/node/.claude /home/node/.codex /workspace /home/node/go
 
-# Copy credentials from build context
+# Copy Claude Code credentials from build context
 # This file is created by build.sh from macOS Keychain
 # Run build.sh to extract credentials before building
 COPY .build-temp/.credentials.json /home/node/.claude/.credentials.json
 RUN chmod 600 /home/node/.claude/.credentials.json && \
     chown node:node /home/node/.claude/.credentials.json
+
+# Copy Codex credentials from build context (if they exist)
+# These files are created by build.sh from ~/.codex
+# The wildcard allows this to succeed even if .codex doesn't exist
+COPY .build-temp/.codex /home/node/.codex/
+RUN if [ -f /home/node/.codex/auth.json ]; then \
+        chmod 600 /home/node/.codex/auth.json; \
+    fi && \
+    chown -R node:node /home/node/.codex
 
 # Set up working directory
 WORKDIR /workspace
@@ -83,8 +95,9 @@ RUN chsh -s /bin/zsh node
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Environment variables for Claude Code flags
+# Environment variables for LLM CLI configuration
 ENV CLAUDE_SKIP_PERMISSIONS="" \
+    LLM_TYPE="claude" \
     HOME=/home/node \
     PATH="/opt/venv/bin:/home/node/go/bin:/usr/local/go/bin:${PATH}"
 
@@ -94,5 +107,5 @@ USER node
 # Set entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
 
-# Default command to run Claude Code
-CMD ["claude"]
+# Default command (can be "claude" or "codex")
+CMD ["llm"]
