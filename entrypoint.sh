@@ -194,6 +194,20 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
     if [ "$LLM_NAME" = "codex" ]; then
         # Launch OpenAI Codex CLI
         LLM_CMD="codex"
+
+        # Add --yolo flag if enabled (full bypass mode)
+        # This disables all approval prompts and sandboxing
+        if [ "$CODEX_YOLO" = "true" ]; then
+            LLM_CMD="$LLM_CMD --yolo"
+            echo "⚠️  Running with --yolo flag"
+            echo "    This bypasses all approval prompts and sandboxing - use only in trusted environments"
+        # Or add --ask-for-approval never for just disabling prompts
+        elif [ "$CODEX_NO_APPROVAL" = "true" ]; then
+            LLM_CMD="$LLM_CMD --ask-for-approval never"
+            echo "⚠️  Running with --ask-for-approval never flag"
+            echo "    This disables approval prompts for all operations"
+        fi
+
         shift
         echo ""
         exec $LLM_CMD "$@"
