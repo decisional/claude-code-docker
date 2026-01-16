@@ -1,28 +1,48 @@
 #!/bin/bash
 
-# Entrypoint script for Claude Code Docker container
+# Entrypoint script for LLM CLI Docker container (Claude Code or OpenAI Codex)
 # Handles automatic git cloning if GIT_REPO_URL is set
 
 set -e
 
-echo "Claude Code Docker Environment"
+# Determine which LLM we're using
+LLM_NAME="${LLM_TYPE:-claude}"
+if [ "$LLM_NAME" = "codex" ]; then
+    echo "OpenAI Codex CLI Docker Environment"
+else
+    echo "Claude Code Docker Environment"
+fi
 echo "==============================="
 
-# Ensure Claude credentials directory has correct permissions
-CLAUDE_DIR="${HOME}/.claude"
-if [ -d "$CLAUDE_DIR" ]; then
-    # Fix permissions on credentials file if it exists
-    if [ -f "$CLAUDE_DIR/.credentials.json" ]; then
-        chmod 600 "$CLAUDE_DIR/.credentials.json" 2>/dev/null || true
-        echo "✓ Claude credentials directory found"
-        echo "  Credentials file: $(ls -lh $CLAUDE_DIR/.credentials.json | awk '{print $5, $6, $7, $8, $9}')"
+# Check credentials based on LLM type
+if [ "$LLM_NAME" = "codex" ]; then
+    # Check for OpenAI API key
+    OPENAI_CONFIG="${HOME}/.openai"
+    if [ -f "$OPENAI_CONFIG" ] || [ -n "$OPENAI_API_KEY" ]; then
+        echo "✓ OpenAI configuration found"
     else
-        echo "⚠ Warning: .credentials.json not found in $CLAUDE_DIR"
-        echo "  Contents of $CLAUDE_DIR:"
-        ls -la "$CLAUDE_DIR" | head -10
+        echo "⚠ Warning: OpenAI API key not found"
+        echo "  To authenticate Codex CLI:"
+        echo "  1. Set OPENAI_API_KEY environment variable in .env, or"
+        echo "  2. Run 'codex config set api_key <your-key>' inside the container"
     fi
 else
-    echo "⚠ Warning: Claude credentials directory not found at $CLAUDE_DIR"
+    # Ensure Claude credentials directory has correct permissions
+    CLAUDE_DIR="${HOME}/.claude"
+    if [ -d "$CLAUDE_DIR" ]; then
+        # Fix permissions on credentials file if it exists
+        if [ -f "$CLAUDE_DIR/.credentials.json" ]; then
+            chmod 600 "$CLAUDE_DIR/.credentials.json" 2>/dev/null || true
+            echo "✓ Claude credentials directory found"
+            echo "  Credentials file: $(ls -lh $CLAUDE_DIR/.credentials.json | awk '{print $5, $6, $7, $8, $9}')"
+        else
+            echo "⚠ Warning: .credentials.json not found in $CLAUDE_DIR"
+            echo "  Contents of $CLAUDE_DIR:"
+            ls -la "$CLAUDE_DIR" | head -10
+        fi
+    else
+        echo "⚠ Warning: Claude credentials directory not found at $CLAUDE_DIR"
+    fi
 fi
 
 # Authenticate GitHub CLI if token is provided
@@ -158,21 +178,37 @@ echo ""
 echo "Working directory: $(pwd)"
 echo ""
 
-# Build Claude command with optional flags
-if [ "$1" = "claude" ]; then
-    CLAUDE_CMD="claude"
-
-    # Add --dangerously-skip-permissions if enabled
-    # This bypasses all permission checks (includes both skip-permissions and dangerously)
-    if [ "$CLAUDE_SKIP_PERMISSIONS" = "true" ]; then
-        CLAUDE_CMD="$CLAUDE_CMD --dangerously-skip-permissions"
-        echo "⚠️  Running with --dangerously-skip-permissions flag"
-        echo "    This bypasses all permission checks - use only in trusted sandboxes"
+# Determine which LLM CLI to launch
+if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
+    # Override LLM_NAME if specific command is given
+    if [ "$1" = "claude" ]; then
+        LLM_NAME="claude"
+    elif [ "$1" = "codex" ]; then
+        LLM_NAME="codex"
     fi
 
-    shift
-    echo ""
-    exec $CLAUDE_CMD "$@"
+    if [ "$LLM_NAME" = "codex" ]; then
+        # Launch OpenAI Codex CLI
+        LLM_CMD="codex"
+        shift
+        echo ""
+        exec $LLM_CMD "$@"
+    else
+        # Launch Claude Code CLI
+        LLM_CMD="claude"
+
+        # Add --dangerously-skip-permissions if enabled
+        # This bypasses all permission checks (includes both skip-permissions and dangerously)
+        if [ "$CLAUDE_SKIP_PERMISSIONS" = "true" ]; then
+            LLM_CMD="$LLM_CMD --dangerously-skip-permissions"
+            echo "⚠️  Running with --dangerously-skip-permissions flag"
+            echo "    This bypasses all permission checks - use only in trusted sandboxes"
+        fi
+
+        shift
+        echo ""
+        exec $LLM_CMD "$@"
+    fi
 else
     # Execute the command passed to the container as-is
     exec "$@"

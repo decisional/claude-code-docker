@@ -48,6 +48,9 @@ ENV PATH="/usr/local/go/bin:${PATH}" \
 # Install Claude Code CLI globally (pinned to latest stable version)
 RUN npm install -g @anthropic-ai/claude-code@2.1.1
 
+# Install OpenAI Codex CLI globally
+RUN npm install -g @openai/codex
+
 # Modify the existing node user to match host UID/GID
 # Handle case where GID already exists by using existing group or creating new one
 RUN if getent group ${GROUP_ID} > /dev/null 2>&1; then \
@@ -83,8 +86,9 @@ RUN chsh -s /bin/zsh node
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Environment variables for Claude Code flags
+# Environment variables for LLM CLI configuration
 ENV CLAUDE_SKIP_PERMISSIONS="" \
+    LLM_TYPE="claude" \
     HOME=/home/node \
     PATH="/opt/venv/bin:/home/node/go/bin:/usr/local/go/bin:${PATH}"
 
@@ -94,5 +98,5 @@ USER node
 # Set entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
 
-# Default command to run Claude Code
-CMD ["claude"]
+# Default command (can be "claude" or "codex")
+CMD ["llm"]

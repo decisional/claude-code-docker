@@ -1,0 +1,20 @@
+#!/bin/bash
+# Remove a Codex CLI instance
+# Usage: ./codex-rm [instance-name]
+
+set -e
+
+if [ -z "$1" ]; then
+    echo "Usage: ./codex-rm <instance-name>"
+    echo ""
+    echo "Available instances:"
+    docker ps -a --filter "name=codex-" --format "  - {{.Names}}" | sed 's/-claude-code-1//' | sed 's/codex-//'
+    exit 1
+fi
+
+INSTANCE_NAME="$1"
+PROJECT_NAME="codex-${INSTANCE_NAME}"
+
+echo "🗑️  Removing Codex CLI instance: $INSTANCE_NAME"
+docker-compose -p "$PROJECT_NAME" down
+echo "✓ Instance removed"

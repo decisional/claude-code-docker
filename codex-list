@@ -1,0 +1,31 @@
+#!/bin/bash
+# List all Codex CLI instances
+# Usage: ./codex-list
+
+echo "📋 Codex CLI Instances"
+echo "======================="
+echo ""
+
+# Check if any containers exist
+if ! docker ps -a --filter "name=codex-" --format "{{.Names}}" | grep -q .; then
+    echo "No Codex CLI instances found."
+    echo ""
+    echo "Create one with: ./codex-start [instance-name]"
+    exit 0
+fi
+
+echo "Running instances:"
+docker ps --filter "name=codex-" --format "  ✓ {{.Names}} ({{.Status}})" | sed 's/-claude-code-1//' | sed 's/codex-//' || echo "  (none)"
+
+echo ""
+echo "Stopped instances:"
+docker ps -a --filter "name=codex-" --filter "status=exited" --format "  ○ {{.Names}} ({{.Status}})" | sed 's/-claude-code-1//' | sed 's/codex-//' || echo "  (none)"
+
+echo ""
+echo "Commands:"
+echo "  ./codex-start [name]  - Start/create instance"
+echo "  ./codex-exec [name]   - Connect to instance"
+echo "  ./codex-shell [name]  - Open zsh shell in instance"
+echo "  ./codex-stop [name]   - Stop instance"
+echo "  ./codex-rm [name]     - Remove instance"
+echo "  ./codex-clean         - Remove all stopped instances"
