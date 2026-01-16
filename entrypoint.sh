@@ -16,15 +16,19 @@ echo "==============================="
 
 # Check credentials based on LLM type
 if [ "$LLM_NAME" = "codex" ]; then
-    # Check for OpenAI API key
-    OPENAI_CONFIG="${HOME}/.openai"
-    if [ -f "$OPENAI_CONFIG" ] || [ -n "$OPENAI_API_KEY" ]; then
-        echo "✓ OpenAI configuration found"
+    # Check for Codex authentication
+    CODEX_AUTH="${HOME}/.codex/auth.json"
+    if [ -f "$CODEX_AUTH" ]; then
+        chmod 600 "$CODEX_AUTH" 2>/dev/null || true
+        echo "✓ Codex credentials found"
+        echo "  Auth file: $(ls -lh $CODEX_AUTH | awk '{print $5, $6, $7, $8, $9}')"
+    elif [ -n "$OPENAI_API_KEY" ]; then
+        echo "✓ OpenAI API key found in environment"
     else
-        echo "⚠ Warning: OpenAI API key not found"
+        echo "⚠ Warning: Codex authentication not found"
         echo "  To authenticate Codex CLI:"
-        echo "  1. Set OPENAI_API_KEY environment variable in .env, or"
-        echo "  2. Run 'codex config set api_key <your-key>' inside the container"
+        echo "  1. Run 'codex' on your host machine and login, then rebuild with ./build.sh, or"
+        echo "  2. Set OPENAI_API_KEY environment variable in .env"
     fi
 else
     # Ensure Claude credentials directory has correct permissions

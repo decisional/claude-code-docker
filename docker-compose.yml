@@ -29,6 +29,8 @@ services:
       - ./shared:/shared:ro
       # Mount Claude credentials with write access (for memories and settings)
       - ./claude-data:/home/node/.claude
+      # Mount Codex credentials with write access (for sessions and settings)
+      - ./codex-data:/home/node/.codex
       # Mount Git config with write access (for git operations and storage)
       - ./git-data/.gitconfig:/home/node/.gitconfig
       # Mount SSH keys with write access (for git clone/push operations)

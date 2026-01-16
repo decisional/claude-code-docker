@@ -63,15 +63,24 @@ RUN if getent group ${GROUP_ID} > /dev/null 2>&1; then \
     chown -R ${USER_ID}:${GROUP_ID} /home/node
 
 # Create directories and set permissions
-RUN mkdir -p /home/node/.claude /workspace /home/node/go/bin && \
-    chown -R node:node /home/node/.claude /workspace /home/node/go
+RUN mkdir -p /home/node/.claude /home/node/.codex /workspace /home/node/go/bin && \
+    chown -R node:node /home/node/.claude /home/node/.codex /workspace /home/node/go
 
-# Copy credentials from build context
+# Copy Claude Code credentials from build context
 # This file is created by build.sh from macOS Keychain
 # Run build.sh to extract credentials before building
 COPY .build-temp/.credentials.json /home/node/.claude/.credentials.json
 RUN chmod 600 /home/node/.claude/.credentials.json && \
     chown node:node /home/node/.claude/.credentials.json
+
+# Copy Codex credentials from build context (if they exist)
+# These files are created by build.sh from ~/.codex
+# The wildcard allows this to succeed even if .codex doesn't exist
+COPY .build-temp/.codex /home/node/.codex/
+RUN if [ -f /home/node/.codex/auth.json ]; then \
+        chmod 600 /home/node/.codex/auth.json; \
+    fi && \
+    chown -R node:node /home/node/.codex
 
 # Set up working directory
 WORKDIR /workspace

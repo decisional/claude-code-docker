@@ -61,10 +61,15 @@ else
     echo "   Option 2: Add GITHUB_TOKEN to .env file (see .env.example)"
 fi
 
-# Create shared directory if it doesn't exist
+# Create shared and data directories if they don't exist
 if [ ! -d "./shared" ]; then
     mkdir -p ./shared
     echo "✅ Created shared directory"
+fi
+
+if [ ! -d "./codex-data" ]; then
+    mkdir -p ./codex-data
+    echo "✅ Created codex-data directory"
 fi
 
 # Setup .env file if it doesn't exist
@@ -94,8 +99,8 @@ echo "✅ Set USER_ID=${CURRENT_UID} and GROUP_ID=${CURRENT_GID} in .env"
 
 echo ""
 
-# Extract credentials from macOS Keychain
-echo "2. Extracting credentials from macOS Keychain..."
+# Extract Claude Code credentials from macOS Keychain
+echo "2. Extracting Claude Code credentials from macOS Keychain..."
 CREDENTIALS=$(security find-generic-password -s "Claude Code-credentials" -w 2>&1)
 
 if [ -z "$CREDENTIALS" ] || echo "$CREDENTIALS" | grep -q "could not be found"; then
@@ -104,15 +109,46 @@ if [ -z "$CREDENTIALS" ] || echo "$CREDENTIALS" | grep -q "could not be found"; 
     exit 1
 fi
 
-echo "✅ Credentials extracted from keychain"
+echo "✅ Claude Code credentials extracted from keychain"
 
 # Create temporary credentials file for Docker build
 echo ""
-echo "3. Creating temporary credentials file..."
+echo "3. Creating temporary credentials files..."
 mkdir -p ./.build-temp
+
+# Claude Code credentials
 echo "$CREDENTIALS" > ./.build-temp/.credentials.json
 chmod 600 ./.build-temp/.credentials.json
-echo "✅ Temporary credentials file created"
+echo "✅ Claude Code credentials file created"
+
+# Copy Codex credentials if they exist
+CODEX_DIR="$HOME/.codex"
+mkdir -p ./.build-temp/.codex
+if [ -d "$CODEX_DIR" ]; then
+    # Copy auth.json and config files
+    if [ -f "$CODEX_DIR/auth.json" ]; then
+        cp "$CODEX_DIR/auth.json" ./.build-temp/.codex/
+        chmod 600 ./.build-temp/.codex/auth.json
+        echo "✅ Codex credentials copied"
+    else
+        echo "⚠️  No Codex auth.json found"
+    fi
+    if [ -f "$CODEX_DIR/config.json" ]; then
+        cp "$CODEX_DIR/config.json" ./.build-temp/.codex/
+    fi
+    if [ -f "$CODEX_DIR/config.toml" ]; then
+        cp "$CODEX_DIR/config.toml" ./.build-temp/.codex/
+    fi
+else
+    echo "⚠️  No Codex credentials found at $CODEX_DIR"
+    echo "   To use Codex CLI, run 'codex' and login, then rebuild"
+fi
+
+# Check if Codex credentials were found (before cleanup)
+CODEX_READY=false
+if [ -f "./.build-temp/.codex/auth.json" ]; then
+    CODEX_READY=true
+fi
 
 # Build Docker image with credentials
 echo ""
@@ -131,6 +167,15 @@ echo ""
 echo "===================================="
 echo "✅ Build complete!"
 echo ""
-echo "Credentials have been baked into the image."
-echo "You can now run: docker-compose run --rm claude-code"
+echo "Credentials have been baked into the image:"
+echo "  - Claude Code: ✓ Ready"
+if [ "$CODEX_READY" = true ]; then
+    echo "  - Codex CLI: ✓ Ready"
+else
+    echo "  - Codex CLI: ⚠ Not configured (run 'codex' and login, then rebuild)"
+fi
+echo ""
+echo "You can now run:"
+echo "  - Claude Code: ./cc-start [instance-name]"
+echo "  - Codex CLI: ./codex-start [instance-name]"
 echo ""
