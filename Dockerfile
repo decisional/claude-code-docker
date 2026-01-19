@@ -11,12 +11,30 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     zsh \
     wget \
-    python3 \
-    python3-pip \
-    python3-venv \
-    python3-psycopg2 \
     libpq-dev \
+    build-essential \
+    zlib1g-dev \
+    libncurses5-dev \
+    libgdbm-dev \
+    libnss3-dev \
+    libssl-dev \
+    libreadline-dev \
+    libffi-dev \
+    libsqlite3-dev \
+    libbz2-dev \
+    liblzma-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Python 3.12 from source
+RUN wget https://www.python.org/ftp/python/3.12.4/Python-3.12.4.tgz && \
+    tar -xf Python-3.12.4.tgz && \
+    cd Python-3.12.4 && \
+    ./configure --enable-optimizations && \
+    make -j$(nproc) && \
+    make altinstall && \
+    cd .. && rm -rf Python-3.12.4 Python-3.12.4.tgz && \
+    ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip3
 
 # Create a default virtual environment for pip installs
 RUN python3 -m venv /opt/venv
