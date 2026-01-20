@@ -16,6 +16,9 @@ class WorkflowState(Enum):
     PLANNED = "planned"
     EXECUTING = "executing"
     EXECUTION_BLOCKED = "execution_blocked"
+    REVIEWING = "reviewing"
+    REVIEW_BLOCKED = "review_blocked"
+    NEEDS_REWORK = "needs_rework"  # Executor needs to fix based on review
     CREATING_PR = "creating_pr"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -60,9 +63,15 @@ class Workflow:
     # Configuration
     planner_model: AgentType = AgentType.CODEX
     executor_model: AgentType = AgentType.CLAUDE
+    review_model: AgentType = AgentType.CODEX
     repo_url: str = ""
     base_branch: str = "main"
     branch_name: str = ""
+
+    # Review tracking
+    review_iteration: int = 0
+    max_review_iterations: int = 3
+    review_feedback: Optional[str] = None
 
     # Artifacts
     workflow_dir: str = ""

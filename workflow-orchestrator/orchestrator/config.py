@@ -22,6 +22,11 @@ class OrchestratorConfig:
     # Model selection
     default_planner: str = "codex"  # "codex" or "claude"
     default_executor: str = "claude"  # "claude" or "codex"
+    default_reviewer: str = "codex"  # "codex" or "claude"
+
+    # Review settings
+    review_enabled: bool = True
+    max_review_iterations: int = 3
 
     # Docker
     docker_image: str = "llm-docker-claude-code:latest"

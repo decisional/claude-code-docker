@@ -14,6 +14,11 @@ base_branch: "main"
 # Options: "claude" or "codex"
 default_planner: "codex"
 default_executor: "claude"
+default_reviewer: "codex"
+
+# Review Settings
+review_enabled: true  # Enable code review phase after execution
+max_review_iterations: 3  # Max times to send back to executor for fixes
 
 # Docker Configuration
 docker_image: "llm-docker-claude-code:latest"

@@ -29,7 +29,8 @@ class WorkflowManager:
         self,
         linear_ticket_id: str,
         planner_model: Optional[AgentType] = None,
-        executor_model: Optional[AgentType] = None
+        executor_model: Optional[AgentType] = None,
+        review_model: Optional[AgentType] = None
     ) -> Workflow:
         """Create a new workflow from a Linear ticket."""
         logger.info(f"Creating workflow for ticket {linear_ticket_id}")
@@ -42,6 +43,8 @@ class WorkflowManager:
             planner_model = AgentType(self.config.default_planner)
         if not executor_model:
             executor_model = AgentType(self.config.default_executor)
+        if not review_model:
+            review_model = AgentType(self.config.default_reviewer)
 
         # Fetch ticket from Linear
         logger.info(f"Fetching ticket from Linear...")
@@ -61,10 +64,12 @@ class WorkflowManager:
             state=WorkflowState.PENDING,
             planner_model=planner_model,
             executor_model=executor_model,
+            review_model=review_model,
             repo_url=self.config.repo_url,
             base_branch=self.config.base_branch,
             branch_name=branch_name,
             workflow_dir=str(workflow_dir),
+            max_review_iterations=self.config.max_review_iterations,
             ticket_title=issue.get('title'),
             ticket_description=issue.get('description'),
             ticket_assignee=issue.get('assignee', {}).get('name'),
@@ -257,25 +262,29 @@ class WorkflowManager:
             elif status == "complete":
                 logger.info("Execution complete")
 
-                # Check for PR URL in agent status or logs
-                pr_url = self._extract_pr_url(agent_status, container_id)
-
-                if pr_url:
-                    workflow.update_state(WorkflowState.COMPLETED)
-                    workflow.pr_url = pr_url
-                    self._save_workflow(workflow)
-
-                    # Update Linear ticket
-                    self._update_linear_ticket(workflow)
+                # If review is enabled, start review phase
+                if self.config.review_enabled:
+                    # Start review phase
+                    self._run_review_phase(workflow)
                 else:
-                    logger.warning("Execution complete but no PR URL found")
-                    workflow.update_state(WorkflowState.COMPLETED)
-                    self._save_workflow(workflow)
+                    # No review - create PR directly
+                    pr_url = self._extract_pr_url(agent_status, container_id)
 
-                # Clean up container (workflow complete)
-                self.docker_manager.stop_container(container_id)
-                self.docker_manager.remove_container(container_id, force=True)
-                logger.info(f"Workflow container cleaned up")
+                    if pr_url:
+                        workflow.update_state(WorkflowState.COMPLETED)
+                        workflow.pr_url = pr_url
+                        self._save_workflow(workflow)
+                        self._update_linear_ticket(workflow)
+                    else:
+                        logger.warning("Execution complete but no PR URL found")
+                        workflow.update_state(WorkflowState.COMPLETED)
+                        self._save_workflow(workflow)
+
+                    # Clean up container (workflow complete)
+                    self.docker_manager.stop_container(container_id)
+                    self.docker_manager.remove_container(container_id, force=True)
+                    logger.info(f"Workflow container cleaned up")
+
                 break
 
             elif status == "error":
@@ -300,6 +309,198 @@ class WorkflowManager:
 
                 self._save_workflow(workflow)
                 break
+
+    def _run_review_phase(self, workflow: Workflow) -> Workflow:
+        """Run the review phase of the workflow."""
+        logger.info(f"Starting review phase for {workflow.id}")
+
+        workflow.update_state(WorkflowState.REVIEWING)
+        workflow.review_iteration += 1
+        self._save_workflow(workflow)
+
+        # Load reviewer prompt template
+        reviewer_prompt = self._get_reviewer_prompt(workflow)
+
+        try:
+            # Execute reviewer in the same container
+            self.docker_manager.exec_agent_in_container(
+                container_id=workflow.container_id,
+                agent_type=workflow.review_model,
+                prompt=reviewer_prompt,
+                detached=True
+            )
+
+            # Monitor review phase
+            self._monitor_review(workflow)
+
+        except Exception as e:
+            logger.error(f"Review phase failed: {e}")
+            workflow.update_state(WorkflowState.FAILED, str(e))
+            self._save_workflow(workflow)
+
+        return workflow
+
+    def _monitor_review(self, workflow: Workflow):
+        """Monitor review phase and handle state transitions."""
+        container_id = workflow.container_id
+        workflow_dir = Path(workflow.workflow_dir)
+
+        logger.info(f"Monitoring review phase in container {container_id[:12]}")
+
+        for status, agent_status in self.docker_manager.wait_for_container(
+            container_id,
+            check_interval=self.config.container_check_interval,
+            workflow_dir=workflow_dir
+        ):
+            if status == "blocked":
+                logger.info(f"Reviewer blocked: {agent_status.question}")
+                workflow.update_state(WorkflowState.REVIEW_BLOCKED)
+                workflow.set_blocked(
+                    reason=agent_status.message or "Reviewer needs input",
+                    question=agent_status.question,
+                    options=agent_status.options
+                )
+                self._save_workflow(workflow)
+
+            elif status == "complete":
+                # Check agent status for review result
+                if agent_status.message and "needs_rework" in agent_status.message.lower():
+                    # Review found issues - send back to executor
+                    logger.info("Review found issues - sending back to executor")
+
+                    # Load feedback
+                    feedback_file = workflow_dir / ".review-feedback.json"
+                    if feedback_file.exists():
+                        with open(feedback_file, 'r') as f:
+                            feedback_data = json.load(f)
+                            workflow.review_feedback = json.dumps(feedback_data, indent=2)
+
+                    # Check if we've hit max iterations
+                    if workflow.review_iteration >= workflow.max_review_iterations:
+                        logger.warning(f"Max review iterations ({workflow.max_review_iterations}) reached")
+                        workflow.update_state(WorkflowState.REVIEW_BLOCKED)
+                        workflow.set_blocked(
+                            reason=f"Max review iterations reached",
+                            question=f"Review has failed {workflow.review_iteration} times. How should we proceed?",
+                            options=["Approve and create PR anyway", "Cancel workflow", "Manual intervention needed"]
+                        )
+                        self._save_workflow(workflow)
+                    else:
+                        # Send back to executor for fixes
+                        workflow.update_state(WorkflowState.NEEDS_REWORK)
+                        self._save_workflow(workflow)
+
+                        # Run executor again with feedback
+                        self._run_execution_with_feedback(workflow)
+
+                else:
+                    # Review approved - create PR
+                    logger.info("Review approved - creating PR")
+                    self._create_pr_and_complete(workflow)
+
+                break
+
+            elif status == "error":
+                logger.error(f"Reviewer error: {agent_status.message}")
+                workflow.update_state(WorkflowState.FAILED, agent_status.message)
+                self._save_workflow(workflow)
+                break
+
+            elif status == "exited":
+                # Check if review passed or failed
+                feedback_file = workflow_dir / ".review-feedback.json"
+                if feedback_file.exists():
+                    # Issues found
+                    logger.info("Review found issues")
+                    if workflow.review_iteration >= workflow.max_review_iterations:
+                        workflow.update_state(WorkflowState.REVIEW_BLOCKED)
+                        workflow.set_blocked(
+                            reason="Max review iterations reached",
+                            question="Continue anyway or cancel?",
+                            options=["Approve", "Cancel"]
+                        )
+                    else:
+                        workflow.update_state(WorkflowState.NEEDS_REWORK)
+                        self._run_execution_with_feedback(workflow)
+                else:
+                    # Approved
+                    logger.info("Review approved")
+                    self._create_pr_and_complete(workflow)
+
+                self._save_workflow(workflow)
+                break
+
+    def _run_execution_with_feedback(self, workflow: Workflow):
+        """Re-run executor with review feedback."""
+        logger.info(f"Re-running executor with review feedback (iteration {workflow.review_iteration})")
+
+        # Update executor prompt to include feedback
+        executor_prompt = self._get_executor_prompt(workflow, with_feedback=True)
+
+        try:
+            # Execute executor again
+            self.docker_manager.exec_agent_in_container(
+                container_id=workflow.container_id,
+                agent_type=workflow.executor_model,
+                prompt=executor_prompt,
+                detached=True
+            )
+
+            # Update state back to executing
+            workflow.update_state(WorkflowState.EXECUTING)
+            self._save_workflow(workflow)
+
+            # Monitor execution (will trigger review again when complete)
+            self._monitor_execution(workflow)
+
+        except Exception as e:
+            logger.error(f"Execution with feedback failed: {e}")
+            workflow.update_state(WorkflowState.FAILED, str(e))
+            self._save_workflow(workflow)
+
+    def _create_pr_and_complete(self, workflow: Workflow):
+        """Create PR and mark workflow as complete."""
+        container_id = workflow.container_id
+        workflow_dir = Path(workflow.workflow_dir)
+
+        # Execute PR creation command
+        pr_prompt = "Create a pull request with a detailed description based on the implementation. Include review notes if available."
+
+        try:
+            # Use same agent to create PR
+            self.docker_manager.exec_agent_in_container(
+                container_id=workflow.container_id,
+                agent_type=workflow.executor_model,
+                prompt=pr_prompt,
+                detached=True
+            )
+
+            # Wait a bit for PR creation
+            time.sleep(5)
+
+            # Get logs to find PR URL
+            logs = self.docker_manager.get_container_logs(container_id)
+            pr_url = self._extract_pr_url_from_logs(logs)
+
+            if pr_url:
+                workflow.update_state(WorkflowState.COMPLETED)
+                workflow.pr_url = pr_url
+                self._update_linear_ticket(workflow)
+            else:
+                logger.warning("PR creation complete but no PR URL found")
+                workflow.update_state(WorkflowState.COMPLETED)
+
+            self._save_workflow(workflow)
+
+            # Clean up container
+            self.docker_manager.stop_container(container_id)
+            self.docker_manager.remove_container(container_id, force=True)
+            logger.info(f"Workflow container cleaned up")
+
+        except Exception as e:
+            logger.error(f"PR creation failed: {e}")
+            workflow.update_state(WorkflowState.FAILED, str(e))
+            self._save_workflow(workflow)
 
     def respond_to_workflow(self, workflow: Workflow, response: str) -> Workflow:
         """Provide human response to a blocked workflow."""
@@ -463,7 +664,7 @@ If you need human input, create /workspace/.workflow-status.json:
 
         return template
 
-    def _get_executor_prompt(self, workflow: Workflow) -> str:
+    def _get_executor_prompt(self, workflow: Workflow, with_feedback: bool = False) -> str:
         """Generate prompt for executor agent."""
         template_path = Path(__file__).parent.parent / "templates" / "executor_prompt.txt"
 
@@ -476,11 +677,10 @@ If you need human input, create /workspace/.workflow-status.json:
 Follow these steps:
 1. Read the plan carefully
 2. Implement all changes
-3. Create a PR with detailed description
-4. When complete, create /workspace/.workflow-status.json:
+3. When complete, create /workspace/.workflow-status.json:
 {
   "status": "complete",
-  "message": "PR created: <PR_URL>"
+  "message": "Implementation complete"
 }
 
 If you need human input, create /workspace/.workflow-status.json:
@@ -489,6 +689,49 @@ If you need human input, create /workspace/.workflow-status.json:
   "question": "Your question here"
 }
 """
+
+        # Add feedback if this is a rework
+        if with_feedback and workflow.review_feedback:
+            feedback_note = f"\n\n## REVIEW FEEDBACK - NEEDS REWORK\n\nThe code reviewer found issues that need to be fixed:\n\n{workflow.review_feedback}\n\nPlease address all the issues mentioned above and update your implementation accordingly.\n"
+            template = feedback_note + template
+
+        return template
+
+    def _get_reviewer_prompt(self, workflow: Workflow) -> str:
+        """Generate prompt for reviewer agent."""
+        template_path = Path(__file__).parent.parent / "templates" / "reviewer_prompt.txt"
+
+        if template_path.exists():
+            with open(template_path, 'r') as f:
+                template = f.read()
+        else:
+            template = """You are a code review agent. Review the implementation against the plan.
+
+Check for:
+- Missing features
+- Bugs or logic errors
+- Security issues
+- Code quality
+
+If APPROVED, create /workspace/.workflow-status.json:
+{
+  "status": "complete",
+  "message": "Code review passed",
+  "review_result": "approved"
+}
+
+If NEEDS_REWORK, create /workspace/.review-feedback.json with issues, then:
+{
+  "status": "needs_rework",
+  "message": "Found issues that need to be fixed"
+}
+"""
+
+        # Inject iteration info
+        template = template.format(
+            iteration=workflow.review_iteration,
+            max_iterations=workflow.max_review_iterations
+        )
 
         return template
 

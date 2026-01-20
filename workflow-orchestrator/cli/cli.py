@@ -165,6 +165,12 @@ def cmd_show(args):
     if workflow.plan_file_path:
         print(f"Plan: {workflow.plan_file_path}")
 
+    # Show review information
+    if workflow.review_iteration > 0:
+        print(f"Review Iteration: {workflow.review_iteration}/{workflow.max_review_iterations}")
+        if workflow.review_feedback:
+            print(f"Review Feedback: (see workflow directory for details)")
+
     # Show PR if created
     if workflow.pr_url:
         print(f"PR: {workflow.pr_url}")
