@@ -178,6 +178,14 @@ if [ -n "$GIT_REPO_URL" ]; then
         echo "✓ Python dependencies installed via Poetry"
     fi
 
+    # Check for alakazam subdirectory with pyproject.toml (autodex repo)
+    if [ -f "alakazam/pyproject.toml" ]; then
+        echo ""
+        echo "📦 Found alakazam/pyproject.toml - installing alakazam dependencies..."
+        (cd alakazam && poetry install --no-interaction 2>&1) || echo "⚠ alakazam Poetry install had warnings (continuing anyway)"
+        echo "✓ alakazam dependencies installed via Poetry"
+    fi
+
     # Auto-install Go dependencies if go.mod exists
     if [ -f "go.mod" ]; then
         echo ""
