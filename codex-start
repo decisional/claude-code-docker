@@ -65,24 +65,28 @@ else
         echo "✓ Creating new container..."
         docker-compose -p "$PROJECT_NAME" run -d --name "$CONTAINER_NAME" $ENV_OVERRIDE claude-code tail -f /dev/null
 
-        # Wait for initial setup (git clone, dependency installation) to complete
-        # This makes the setup visible to the user instead of happening invisibly
+        # Wait for initial repository clone to complete
+        # Dependency installation will continue in background
         echo ""
-        echo "⏳ Waiting for initial setup to complete..."
-        echo "   (Cloning repository and installing dependencies)"
+        echo "⏳ Cloning repository..."
         echo ""
 
-        # Follow logs until we see the completion marker
+        # Follow logs until clone is complete
         docker logs -f "$CONTAINER_NAME" 2>&1 | while IFS= read -r line; do
             echo "   $line"
-            # Break when we see the working directory message (means setup is done)
-            if echo "$line" | grep -q "Working directory:"; then
+            # Break when clone is complete - let dependencies install in background
+            if echo "$line" | grep -q "Repository cloned successfully!"; then
+                break
+            fi
+            # Also handle case where no git repo is configured
+            if echo "$line" | grep -q "No git repository configured"; then
                 break
             fi
         done
 
         echo ""
-        echo "✓ Initial setup complete"
+        echo "✓ Repository ready"
+        echo "  (Dependencies are installing in background)"
     fi
 
     echo ""
