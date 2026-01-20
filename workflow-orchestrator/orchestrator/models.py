@@ -70,9 +70,9 @@ class Workflow:
     pr_url: Optional[str] = None
     pr_number: Optional[int] = None
 
-    # Container tracking
-    planner_container_id: Optional[str] = None
-    executor_container_id: Optional[str] = None
+    # Container tracking (single container for both phases)
+    container_id: Optional[str] = None
+    container_name: Optional[str] = None
 
     # Human-in-the-loop
     block_info: Optional[BlockInfo] = None

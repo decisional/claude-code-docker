@@ -84,11 +84,36 @@ class WorkflowManager:
         """Start executing a workflow."""
         logger.info(f"Starting workflow {workflow.id}")
 
-        workflow.update_state(WorkflowState.PLANNING)
-        self._save_workflow(workflow)
+        # Start single container for entire workflow
+        container_name = f"workflow-{workflow.id}"
+        workflow_dir = Path(workflow.workflow_dir)
 
-        # Start planning phase
-        return self._run_planning_phase(workflow)
+        try:
+            container_id = self.docker_manager.start_workflow_container(
+                container_name=container_name,
+                workflow_dir=workflow_dir,
+                repo_url=workflow.repo_url,
+                branch_name=workflow.branch_name,
+                github_token=self.config.github_token
+            )
+
+            workflow.container_id = container_id
+            workflow.container_name = container_name
+            self._save_workflow(workflow)
+
+            logger.info(f"Container started: {container_id[:12]}")
+
+            # Run planning phase in the container
+            workflow.update_state(WorkflowState.PLANNING)
+            self._save_workflow(workflow)
+
+            return self._run_planning_phase(workflow)
+
+        except Exception as e:
+            logger.error(f"Failed to start workflow: {e}")
+            workflow.update_state(WorkflowState.FAILED, str(e))
+            self._save_workflow(workflow)
+            return workflow
 
     def _run_planning_phase(self, workflow: Workflow) -> Workflow:
         """Run the planning phase of the workflow."""
@@ -99,24 +124,16 @@ class WorkflowManager:
         # Load planner prompt template
         planner_prompt = self._get_planner_prompt(workflow)
 
-        # Start planner container
-        container_name = f"workflow-{workflow.id}-planner"
-
         try:
-            container_id = self.docker_manager.start_agent_container(
-                container_name=container_name,
+            # Execute planner in the existing container
+            self.docker_manager.exec_agent_in_container(
+                container_id=workflow.container_id,
                 agent_type=workflow.planner_model,
-                workflow_dir=workflow_dir,
-                repo_url=workflow.repo_url,
-                branch_name=workflow.branch_name,
                 prompt=planner_prompt,
-                github_token=self.config.github_token
+                detached=True
             )
 
-            workflow.planner_container_id = container_id
-            self._save_workflow(workflow)
-
-            # Monitor planner container
+            # Monitor planning phase
             self._monitor_planning(workflow)
 
         except Exception as e:
@@ -127,11 +144,11 @@ class WorkflowManager:
         return workflow
 
     def _monitor_planning(self, workflow: Workflow):
-        """Monitor planning container and handle state transitions."""
-        container_id = workflow.planner_container_id
+        """Monitor planning phase and handle state transitions."""
+        container_id = workflow.container_id
         workflow_dir = Path(workflow.workflow_dir)
 
-        logger.info(f"Monitoring planner container {container_id[:12]}")
+        logger.info(f"Monitoring planning phase in container {container_id[:12]}")
 
         for status, agent_status in self.docker_manager.wait_for_container(
             container_id,
@@ -157,10 +174,7 @@ class WorkflowManager:
                 workflow.plan_file_path = agent_status.output_file
                 self._save_workflow(workflow)
 
-                # Clean up planner container
-                self.docker_manager.stop_container(container_id)
-                self.docker_manager.remove_container(container_id, force=True)
-
+                # No need to stop container - same container continues to execution
                 # Start execution phase
                 self._run_execution_phase(workflow)
                 break
@@ -196,29 +210,19 @@ class WorkflowManager:
         workflow.update_state(WorkflowState.EXECUTING)
         self._save_workflow(workflow)
 
-        workflow_dir = Path(workflow.workflow_dir)
-
         # Load executor prompt template
         executor_prompt = self._get_executor_prompt(workflow)
 
-        # Start executor container
-        container_name = f"workflow-{workflow.id}-executor"
-
         try:
-            container_id = self.docker_manager.start_agent_container(
-                container_name=container_name,
+            # Execute executor in the same container
+            self.docker_manager.exec_agent_in_container(
+                container_id=workflow.container_id,
                 agent_type=workflow.executor_model,
-                workflow_dir=workflow_dir,
-                repo_url=workflow.repo_url,
-                branch_name=workflow.branch_name,
                 prompt=executor_prompt,
-                github_token=self.config.github_token
+                detached=True
             )
 
-            workflow.executor_container_id = container_id
-            self._save_workflow(workflow)
-
-            # Monitor executor container
+            # Monitor execution phase
             self._monitor_execution(workflow)
 
         except Exception as e:
@@ -229,11 +233,11 @@ class WorkflowManager:
         return workflow
 
     def _monitor_execution(self, workflow: Workflow):
-        """Monitor execution container and handle state transitions."""
-        container_id = workflow.executor_container_id
+        """Monitor execution phase and handle state transitions."""
+        container_id = workflow.container_id
         workflow_dir = Path(workflow.workflow_dir)
 
-        logger.info(f"Monitoring executor container {container_id[:12]}")
+        logger.info(f"Monitoring execution phase in container {container_id[:12]}")
 
         for status, agent_status in self.docker_manager.wait_for_container(
             container_id,
@@ -268,9 +272,10 @@ class WorkflowManager:
                     workflow.update_state(WorkflowState.COMPLETED)
                     self._save_workflow(workflow)
 
-                # Clean up
+                # Clean up container (workflow complete)
                 self.docker_manager.stop_container(container_id)
                 self.docker_manager.remove_container(container_id, force=True)
+                logger.info(f"Workflow container cleaned up")
                 break
 
             elif status == "error":

@@ -186,11 +186,11 @@ def cmd_show(args):
         print(f"Error: {workflow.error_message}")
         print()
 
-    # Show container IDs
-    if workflow.planner_container_id:
-        print(f"Planner Container: {workflow.planner_container_id[:12]}")
-    if workflow.executor_container_id:
-        print(f"Executor Container: {workflow.executor_container_id[:12]}")
+    # Show container ID
+    if workflow.container_id:
+        print(f"Container: {workflow.container_id[:12]}")
+        if workflow.container_name:
+            print(f"Container Name: {workflow.container_name}")
 
     return 0
 
@@ -249,21 +249,14 @@ def cmd_logs(args):
         print(f"❌ Workflow not found: {args.workflow_id}")
         return 1
 
-    # Determine which container to show
-    container_id = None
-    if args.executor and workflow.executor_container_id:
-        container_id = workflow.executor_container_id
-        print(f"=== Executor Logs ({container_id[:12]}) ===\n")
-    elif workflow.planner_container_id:
-        container_id = workflow.planner_container_id
-        print(f"=== Planner Logs ({container_id[:12]}) ===\n")
-    elif workflow.executor_container_id:
-        container_id = workflow.executor_container_id
-        print(f"=== Executor Logs ({container_id[:12]}) ===\n")
+    # Get container ID
+    container_id = workflow.container_id
 
     if not container_id:
         print("❌ No container found for this workflow")
         return 1
+
+    print(f"=== Workflow Logs ({container_id[:12]}) ===\n")
 
     # Get logs
     tail = args.tail if args.tail else None
@@ -288,22 +281,14 @@ def cmd_cancel(args):
         print(f"❌ Workflow is already in terminal state: {workflow.state.value}")
         return 1
 
-    # Stop containers
-    if workflow.planner_container_id:
+    # Stop container
+    if workflow.container_id:
         try:
-            manager.docker_manager.stop_container(workflow.planner_container_id)
-            manager.docker_manager.remove_container(workflow.planner_container_id, force=True)
-            print(f"✓ Stopped planner container")
+            manager.docker_manager.stop_container(workflow.container_id)
+            manager.docker_manager.remove_container(workflow.container_id, force=True)
+            print(f"✓ Stopped workflow container")
         except Exception as e:
-            logger.warning(f"Failed to stop planner container: {e}")
-
-    if workflow.executor_container_id:
-        try:
-            manager.docker_manager.stop_container(workflow.executor_container_id)
-            manager.docker_manager.remove_container(workflow.executor_container_id, force=True)
-            print(f"✓ Stopped executor container")
-        except Exception as e:
-            logger.warning(f"Failed to stop executor container: {e}")
+            logger.warning(f"Failed to stop container: {e}")
 
     # Update state
     workflow.update_state(WorkflowState.CANCELLED)
@@ -324,26 +309,20 @@ def cmd_interact(args):
         print(f"❌ Workflow not found: {args.workflow_id}")
         return 1
 
-    # Determine which container to interact with
-    container_id = None
-    agent_type = None
-
-    if args.executor and workflow.executor_container_id:
-        container_id = workflow.executor_container_id
-        agent_type = workflow.executor_model
-        phase = "executor"
-    elif workflow.planner_container_id:
-        container_id = workflow.planner_container_id
-        agent_type = workflow.planner_model
-        phase = "planner"
-    elif workflow.executor_container_id:
-        container_id = workflow.executor_container_id
-        agent_type = workflow.executor_model
-        phase = "executor"
+    # Get container ID
+    container_id = workflow.container_id
 
     if not container_id:
         print("❌ No active container found for this workflow")
         return 1
+
+    # Determine which agent/phase
+    if workflow.state in [WorkflowState.PLANNING, WorkflowState.PLANNING_BLOCKED, WorkflowState.PLANNED]:
+        agent_type = workflow.planner_model
+        phase = "planning"
+    else:
+        agent_type = workflow.executor_model
+        phase = "execution"
 
     # Check if container is running
     if not manager.docker_manager.is_container_running(container_id):
@@ -438,23 +417,18 @@ def cmd_shell(args):
         print(f"❌ Workflow not found: {args.workflow_id}")
         return 1
 
-    # Determine which container to access
-    container_id = None
-    phase = None
-
-    if args.executor and workflow.executor_container_id:
-        container_id = workflow.executor_container_id
-        phase = "executor"
-    elif workflow.planner_container_id:
-        container_id = workflow.planner_container_id
-        phase = "planner"
-    elif workflow.executor_container_id:
-        container_id = workflow.executor_container_id
-        phase = "executor"
+    # Get container ID
+    container_id = workflow.container_id
 
     if not container_id:
         print("❌ No active container found for this workflow")
         return 1
+
+    # Determine phase
+    if workflow.state in [WorkflowState.PLANNING, WorkflowState.PLANNING_BLOCKED, WorkflowState.PLANNED]:
+        phase = "planning"
+    else:
+        phase = "execution"
 
     # Check if container is running
     if not manager.docker_manager.is_container_running(container_id):
@@ -532,7 +506,6 @@ def main():
     # logs command
     logs_parser = subparsers.add_parser("logs", help="Show container logs")
     logs_parser.add_argument("workflow_id", help="Workflow ID")
-    logs_parser.add_argument("--executor", action="store_true", help="Show executor logs instead of planner")
     logs_parser.add_argument("--tail", type=int, help="Number of lines to show")
     logs_parser.set_defaults(func=cmd_logs)
 
@@ -544,13 +517,11 @@ def main():
     # interact command
     interact_parser = subparsers.add_parser("interact", help="Start interactive session with agent")
     interact_parser.add_argument("workflow_id", help="Workflow ID")
-    interact_parser.add_argument("--executor", action="store_true", help="Interact with executor instead of planner")
     interact_parser.set_defaults(func=cmd_interact)
 
     # shell command
     shell_parser = subparsers.add_parser("shell", help="Open shell in workflow container")
     shell_parser.add_argument("workflow_id", help="Workflow ID")
-    shell_parser.add_argument("--executor", action="store_true", help="Open shell in executor instead of planner")
     shell_parser.add_argument("--shell", default="/bin/bash", help="Shell to use (default: /bin/bash)")
     shell_parser.set_defaults(func=cmd_shell)
 

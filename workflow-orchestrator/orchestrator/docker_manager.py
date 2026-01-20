@@ -18,6 +18,132 @@ class DockerManager:
         self.docker_image = docker_image
         self.workspace_base = workspace_base
 
+    def start_workflow_container(
+        self,
+        container_name: str,
+        workflow_dir: Path,
+        repo_url: str,
+        branch_name: str,
+        github_token: Optional[str] = None
+    ) -> str:
+        """
+        Start a long-running container for the workflow.
+
+        This container stays alive and we use docker exec to run
+        planning and execution phases within it.
+
+        Returns:
+            Container ID
+        """
+        # Prepare environment variables
+        env_vars = {
+            "GIT_REPO_URL": repo_url,
+            "GIT_BRANCH": branch_name,
+            "CLAUDE_SKIP_PERMISSIONS": "true",
+            "CODEX_YOLO": "true",
+            "CODEX_APPROVAL_POLICY": "yolo"
+        }
+
+        if github_token:
+            env_vars["GITHUB_TOKEN"] = github_token
+
+        # Build docker run command
+        cmd = [
+            "docker", "run",
+            "-d",  # Detached mode
+            "--name", container_name,
+            "-w", self.workspace_base,
+        ]
+
+        # Add environment variables
+        for key, value in env_vars.items():
+            cmd.extend(["-e", f"{key}={value}"])
+
+        # Mount workflow directory
+        cmd.extend([
+            "-v", f"{workflow_dir.absolute()}:{self.workspace_base}",
+            "-v", f"{Path.cwd()}/claude-data:/home/node/.claude",
+            "-v", f"{Path.cwd()}/codex-data:/home/node/.codex",
+            "-v", f"{Path.cwd()}/git-data/.gitconfig:/home/node/.gitconfig",
+            "-v", f"{Path.cwd()}/git-data/.ssh:/home/node/.ssh",
+            "-v", f"{Path.cwd()}/git-data/.config/gh:/home/node/.config/gh",
+        ])
+
+        # Add image and command (keep container alive)
+        cmd.extend([
+            self.docker_image,
+            "tail", "-f", "/dev/null"  # Keep container running
+        ])
+
+        logger.info(f"Starting workflow container: {container_name}")
+        logger.debug(f"Command: {' '.join(cmd)}")
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            container_id = result.stdout.strip()
+            logger.info(f"Container started: {container_id[:12]}")
+            return container_id
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to start container: {e.stderr}")
+            raise
+
+    def exec_agent_in_container(
+        self,
+        container_id: str,
+        agent_type: AgentType,
+        prompt: str,
+        detached: bool = True
+    ) -> Optional[str]:
+        """
+        Execute an agent (claude/codex) command in a running container.
+
+        Args:
+            container_id: The running container ID
+            agent_type: Which agent to run (claude or codex)
+            prompt: The prompt to give the agent
+            detached: If True, run in background and return immediately
+
+        Returns:
+            If detached=False, returns output. If detached=True, returns None.
+        """
+        cli_command = agent_type.value  # "claude" or "codex"
+
+        cmd = [
+            "docker", "exec",
+            "-w", self.workspace_base,
+        ]
+
+        if not detached:
+            cmd.append("-it")
+
+        cmd.extend([
+            container_id,
+            cli_command,
+            prompt
+        ])
+
+        logger.info(f"Executing {agent_type.value} in container {container_id[:12]}")
+        logger.debug(f"Command: {' '.join(cmd)}")
+
+        try:
+            if detached:
+                # Start in background, return immediately
+                subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                logger.info(f"Agent started in background")
+                return None
+            else:
+                # Wait for completion
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                return result.stdout
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to exec in container: {e.stderr}")
+            raise
+
     def start_agent_container(
         self,
         container_name: str,
