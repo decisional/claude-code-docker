@@ -77,74 +77,64 @@ if [ -n "$GIT_REPO_URL" ]; then
         TARGET_DIR="/workspace/$REPO_NAME"
     fi
 
-    # Always do a fresh clone to ensure clean state
-    # Remove existing directory if it exists with thorough cleanup
-    if [ -d "$TARGET_DIR" ]; then
-        echo "Removing existing repository at $TARGET_DIR for fresh clone..."
-        # Force remove with verbose error handling
-        if ! rm -rf "$TARGET_DIR" 2>&1; then
-            echo "⚠ Warning: Failed to remove $TARGET_DIR, retrying with force..."
-            chmod -R u+w "$TARGET_DIR" 2>/dev/null || true
-            rm -rf "$TARGET_DIR" || true
-        fi
-
-        # Verify removal was successful
-        if [ -d "$TARGET_DIR" ]; then
-            echo "❌ Error: Could not remove $TARGET_DIR"
-            exit 1
-        fi
-    fi
-
-    # Ensure parent directory exists and is writable
-    mkdir -p "$(dirname "$TARGET_DIR")"
-
-    # Clear any git environment variables that might interfere with cloning
-    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
-    unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES
-
-    echo "Cloning repository to $TARGET_DIR..."
-
-    # Determine clone strategy based on whether branch is specified and exists
-    CLONE_BRANCH_ARG=""
-    CREATE_NEW_BRANCH=false
-    
-    if [ -n "$GIT_BRANCH" ]; then
-        # Check if branch exists remotely using git ls-remote
-        if GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$GIT_REPO_URL" "$GIT_BRANCH" 2>/dev/null | grep -q "refs/heads/$GIT_BRANCH"; then
-            echo "✓ Branch '$GIT_BRANCH' exists remotely"
-            CLONE_BRANCH_ARG="--branch $GIT_BRANCH"
-        else
-            echo "ℹ Branch '$GIT_BRANCH' does not exist remotely"
-            echo "  Will create new branch from default branch"
-            CREATE_NEW_BRANCH=true
-        fi
-    fi
-    
-    # Clone the repository
-    if GIT_TERMINAL_PROMPT=0 git clone --config core.fsmonitor=false $CLONE_BRANCH_ARG "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
+    # Check if repository already exists
+    if [ -d "$TARGET_DIR/.git" ]; then
+        echo "✓ Repository already exists at $TARGET_DIR"
+        echo "  Skipping clone - using existing repository"
         cd "$TARGET_DIR"
-        
-        # If we need to create a new branch, do it now
-        if [ "$CREATE_NEW_BRANCH" = true ]; then
-            if git checkout -b "$GIT_BRANCH" 2>&1; then
-                echo "✓ Created new branch '$GIT_BRANCH' from default branch"
-            else
-                echo "❌ Failed to create branch '$GIT_BRANCH'"
+
+        # Show current branch info
+        CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+        echo "  Current branch: $CURRENT_BRANCH"
+    else
+        # Repository doesn't exist or is not a valid git repo - clone it
+
+        # Remove existing directory if it exists but is not a git repo
+        if [ -d "$TARGET_DIR" ]; then
+            echo "Removing invalid directory at $TARGET_DIR..."
+            if ! rm -rf "$TARGET_DIR" 2>&1; then
+                echo "⚠ Warning: Failed to remove $TARGET_DIR, retrying with force..."
+                chmod -R u+w "$TARGET_DIR" 2>/dev/null || true
+                rm -rf "$TARGET_DIR" || true
+            fi
+
+            # Verify removal was successful
+            if [ -d "$TARGET_DIR" ]; then
+                echo "❌ Error: Could not remove $TARGET_DIR"
                 exit 1
             fi
-        else
-            [ -n "$GIT_BRANCH" ] && echo "✓ Cloned branch: $GIT_BRANCH" || echo "✓ Cloned repository using default branch"
         fi
-    else
-        CLONE_EXIT=$?
-        
-        # Check if directory was created despite error (partial clone)
-        if [ -d "$TARGET_DIR/.git" ]; then
-            echo "⚠ Clone completed but git reported an error (exit code: $CLONE_EXIT)"
-            echo "  Repository appears to be intact, continuing..."
+
+        # Ensure parent directory exists and is writable
+        mkdir -p "$(dirname "$TARGET_DIR")"
+
+        # Clear any git environment variables that might interfere with cloning
+        unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+        unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES
+
+        echo "Cloning repository to $TARGET_DIR..."
+
+        # Determine clone strategy based on whether branch is specified and exists
+        CLONE_BRANCH_ARG=""
+        CREATE_NEW_BRANCH=false
+
+        if [ -n "$GIT_BRANCH" ]; then
+            # Check if branch exists remotely using git ls-remote
+            if GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$GIT_REPO_URL" "$GIT_BRANCH" 2>/dev/null | grep -q "refs/heads/$GIT_BRANCH"; then
+                echo "✓ Branch '$GIT_BRANCH' exists remotely"
+                CLONE_BRANCH_ARG="--branch $GIT_BRANCH"
+            else
+                echo "ℹ Branch '$GIT_BRANCH' does not exist remotely"
+                echo "  Will create new branch from default branch"
+                CREATE_NEW_BRANCH=true
+            fi
+        fi
+
+        # Clone the repository
+        if GIT_TERMINAL_PROMPT=0 git clone --config core.fsmonitor=false $CLONE_BRANCH_ARG "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
             cd "$TARGET_DIR"
-            
-            # If we still need to create the branch, try now
+
+            # If we need to create a new branch, do it now
             if [ "$CREATE_NEW_BRANCH" = true ]; then
                 if git checkout -b "$GIT_BRANCH" 2>&1; then
                     echo "✓ Created new branch '$GIT_BRANCH' from default branch"
@@ -152,46 +142,67 @@ if [ -n "$GIT_REPO_URL" ]; then
                     echo "❌ Failed to create branch '$GIT_BRANCH'"
                     exit 1
                 fi
+            else
+                [ -n "$GIT_BRANCH" ] && echo "✓ Cloned branch: $GIT_BRANCH" || echo "✓ Cloned repository using default branch"
             fi
-            
-            # Fix any git state issues
-            git fsck --full 2>&1 || echo "  (git fsck completed with warnings)"
         else
-            echo "❌ Failed to clone repository (exit code: $CLONE_EXIT)"
+            CLONE_EXIT=$?
 
-            # Show what's in the workspace for debugging
-            echo "Workspace contents:"
-            ls -la /workspace/ 2>&1 || echo "Cannot list /workspace"
+            # Check if directory was created despite error (partial clone)
+            if [ -d "$TARGET_DIR/.git" ]; then
+                echo "⚠ Clone completed but git reported an error (exit code: $CLONE_EXIT)"
+                echo "  Repository appears to be intact, continuing..."
+                cd "$TARGET_DIR"
 
-            exit 1
+                # If we still need to create the branch, try now
+                if [ "$CREATE_NEW_BRANCH" = true ]; then
+                    if git checkout -b "$GIT_BRANCH" 2>&1; then
+                        echo "✓ Created new branch '$GIT_BRANCH' from default branch"
+                    else
+                        echo "❌ Failed to create branch '$GIT_BRANCH'"
+                        exit 1
+                    fi
+                fi
+
+                # Fix any git state issues
+                git fsck --full 2>&1 || echo "  (git fsck completed with warnings)"
+            else
+                echo "❌ Failed to clone repository (exit code: $CLONE_EXIT)"
+
+                # Show what's in the workspace for debugging
+                echo "Workspace contents:"
+                ls -la /workspace/ 2>&1 || echo "Cannot list /workspace"
+
+                exit 1
+            fi
         fi
-    fi
 
-    echo "✓ Repository cloned successfully!"
-    cd "$TARGET_DIR"
+        echo "✓ Repository cloned successfully!"
+        cd "$TARGET_DIR"
 
-    # Auto-install Python dependencies if pyproject.toml exists
-    if [ -f "pyproject.toml" ]; then
-        echo ""
-        echo "📦 Found pyproject.toml - installing Python dependencies..."
-        poetry install --no-interaction 2>&1 || echo "⚠ Poetry install had warnings (continuing anyway)"
-        echo "✓ Python dependencies installed via Poetry"
-    fi
+        # Auto-install Python dependencies if pyproject.toml exists
+        if [ -f "pyproject.toml" ]; then
+            echo ""
+            echo "📦 Found pyproject.toml - installing Python dependencies..."
+            poetry install --no-interaction 2>&1 || echo "⚠ Poetry install had warnings (continuing anyway)"
+            echo "✓ Python dependencies installed via Poetry"
+        fi
 
-    # Check for alakazam subdirectory with pyproject.toml (autodex repo)
-    if [ -f "alakazam/pyproject.toml" ]; then
-        echo ""
-        echo "📦 Found alakazam/pyproject.toml - installing alakazam dependencies..."
-        (cd alakazam && poetry install --no-interaction 2>&1) || echo "⚠ alakazam Poetry install had warnings (continuing anyway)"
-        echo "✓ alakazam dependencies installed via Poetry"
-    fi
+        # Check for alakazam subdirectory with pyproject.toml (autodex repo)
+        if [ -f "alakazam/pyproject.toml" ]; then
+            echo ""
+            echo "📦 Found alakazam/pyproject.toml - installing alakazam dependencies..."
+            (cd alakazam && poetry install --no-interaction 2>&1) || echo "⚠ alakazam Poetry install had warnings (continuing anyway)"
+            echo "✓ alakazam dependencies installed via Poetry"
+        fi
 
-    # Auto-install Go dependencies if go.mod exists
-    if [ -f "go.mod" ]; then
-        echo ""
-        echo "📦 Found go.mod - installing Go dependencies..."
-        go mod download 2>&1 || echo "⚠ go mod download had warnings (continuing anyway)"
-        echo "✓ Go dependencies installed"
+        # Auto-install Go dependencies if go.mod exists
+        if [ -f "go.mod" ]; then
+            echo ""
+            echo "📦 Found go.mod - installing Go dependencies..."
+            go mod download 2>&1 || echo "⚠ go mod download had warnings (continuing anyway)"
+            echo "✓ Go dependencies installed"
+        fi
     fi
 else
     echo "No git repository configured (GIT_REPO_URL not set)"
