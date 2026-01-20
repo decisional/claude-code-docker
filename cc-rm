@@ -17,4 +17,6 @@ PROJECT_NAME="claude-${INSTANCE_NAME}"
 
 echo "🗑️  Removing Claude Code instance: $INSTANCE_NAME"
 docker-compose -p "$PROJECT_NAME" down
+NETWORK_NAME="${PROJECT_NAME}_default"
+docker network rm "$NETWORK_NAME" 2>/dev/null && echo "✓ Network removed: $NETWORK_NAME" || true
 echo "✓ Instance removed"

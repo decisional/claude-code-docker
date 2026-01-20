@@ -46,7 +46,13 @@ while IFS= read -r CONTAINER_NAME; do
 
     echo "  🗑️  Removing: $INSTANCE_NAME"
     docker-compose -p "$PROJECT_NAME" down 2>/dev/null || echo "     ⚠️  Warning: Could not remove $INSTANCE_NAME"
+    NETWORK_NAME="${PROJECT_NAME}_default"
+    docker network rm "$NETWORK_NAME" 2>/dev/null || true
 done <<< "$STOPPED_CONTAINERS"
+
+echo ""
+echo "Pruning orphaned networks..."
+docker network prune -f 2>/dev/null | grep -v "^$" || true
 
 echo ""
 echo "✓ Cleanup complete!"
