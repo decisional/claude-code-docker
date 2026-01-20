@@ -314,6 +314,169 @@ def cmd_cancel(args):
     return 0
 
 
+def cmd_interact(args):
+    """Start an interactive session with the agent."""
+    config = load_config(args.config)
+    manager = WorkflowManager(config)
+
+    workflow = manager.load_workflow(args.workflow_id)
+    if not workflow:
+        print(f"❌ Workflow not found: {args.workflow_id}")
+        return 1
+
+    # Determine which container to interact with
+    container_id = None
+    agent_type = None
+
+    if args.executor and workflow.executor_container_id:
+        container_id = workflow.executor_container_id
+        agent_type = workflow.executor_model
+        phase = "executor"
+    elif workflow.planner_container_id:
+        container_id = workflow.planner_container_id
+        agent_type = workflow.planner_model
+        phase = "planner"
+    elif workflow.executor_container_id:
+        container_id = workflow.executor_container_id
+        agent_type = workflow.executor_model
+        phase = "executor"
+
+    if not container_id:
+        print("❌ No active container found for this workflow")
+        return 1
+
+    # Check if container is running
+    if not manager.docker_manager.is_container_running(container_id):
+        print(f"❌ Container is not running (status: {manager.docker_manager.get_container_status(container_id)})")
+        return 1
+
+    print(f"Workflow: {workflow.id}")
+    print(f"Ticket: {workflow.linear_ticket_id} - {workflow.ticket_title}")
+    print(f"State: {workflow.state.value}")
+    print(f"Phase: {phase}")
+    print(f"Agent: {agent_type.value}")
+    print()
+
+    # Build context prompt
+    context_lines = [
+        f"You are helping with workflow {workflow.id} for Linear ticket {workflow.linear_ticket_id}.",
+        f"Ticket: {workflow.ticket_title}",
+    ]
+
+    if workflow.is_blocked() and workflow.block_info:
+        context_lines.extend([
+            "",
+            f"The workflow is currently blocked on this question:",
+            f"{workflow.block_info.question}",
+        ])
+        if workflow.block_info.options:
+            context_lines.append(f"Options: {', '.join(workflow.block_info.options)}")
+        context_lines.extend([
+            "",
+            "The human wants to discuss this with you interactively.",
+            "After the discussion, help them formulate a clear answer.",
+        ])
+    else:
+        context_lines.extend([
+            "",
+            f"Current state: {workflow.state.value}",
+            "The human wants to chat with you about this workflow.",
+        ])
+
+    context_lines.extend([
+        "",
+        "Working directory: /workspace",
+        f"Ticket details: /workspace/linear-ticket.md",
+    ])
+
+    if workflow.plan_file_path:
+        context_lines.append(f"Plan: /workspace/{workflow.plan_file_path}")
+
+    context_prompt = "\n".join(context_lines)
+
+    # Start interactive session
+    try:
+        manager.docker_manager.start_interactive_session(
+            container_id=container_id,
+            agent_type=agent_type,
+            context_prompt=context_prompt
+        )
+
+        # After interactive session, check if user wants to save a response
+        if workflow.is_blocked():
+            print("\n" + "="*60)
+            print("The workflow is still blocked.")
+            print(f"Question: {workflow.block_info.question}")
+            print()
+            save_response = input("Did you reach a decision? (y/n): ").strip().lower()
+
+            if save_response == 'y':
+                response = input("Enter the decision/response: ").strip()
+                if response:
+                    manager.respond_to_workflow(workflow, response)
+                    print(f"✓ Response saved: {response}")
+                    print("  Workflow will resume automatically")
+            else:
+                print("No response saved. Workflow remains blocked.")
+                print("You can respond later with: ./workflow respond " + workflow.id)
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        logger.exception("Failed to start interactive session")
+        return 1
+
+    return 0
+
+
+def cmd_shell(args):
+    """Open a shell in the workflow container."""
+    config = load_config(args.config)
+    manager = WorkflowManager(config)
+
+    workflow = manager.load_workflow(args.workflow_id)
+    if not workflow:
+        print(f"❌ Workflow not found: {args.workflow_id}")
+        return 1
+
+    # Determine which container to access
+    container_id = None
+    phase = None
+
+    if args.executor and workflow.executor_container_id:
+        container_id = workflow.executor_container_id
+        phase = "executor"
+    elif workflow.planner_container_id:
+        container_id = workflow.planner_container_id
+        phase = "planner"
+    elif workflow.executor_container_id:
+        container_id = workflow.executor_container_id
+        phase = "executor"
+
+    if not container_id:
+        print("❌ No active container found for this workflow")
+        return 1
+
+    # Check if container is running
+    if not manager.docker_manager.is_container_running(container_id):
+        print(f"❌ Container is not running (status: {manager.docker_manager.get_container_status(container_id)})")
+        return 1
+
+    print(f"Workflow: {workflow.id}")
+    print(f"Phase: {phase}")
+    print(f"Container: {container_id[:12]}")
+    print()
+
+    # Open shell
+    try:
+        manager.docker_manager.open_shell_in_container(container_id, args.shell)
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        logger.exception("Failed to open shell")
+        return 1
+
+    return 0
+
+
 def _time_ago(dt: datetime) -> str:
     """Format datetime as 'X ago' string."""
     now = datetime.utcnow()
@@ -377,6 +540,19 @@ def main():
     cancel_parser = subparsers.add_parser("cancel", help="Cancel a running workflow")
     cancel_parser.add_argument("workflow_id", help="Workflow ID")
     cancel_parser.set_defaults(func=cmd_cancel)
+
+    # interact command
+    interact_parser = subparsers.add_parser("interact", help="Start interactive session with agent")
+    interact_parser.add_argument("workflow_id", help="Workflow ID")
+    interact_parser.add_argument("--executor", action="store_true", help="Interact with executor instead of planner")
+    interact_parser.set_defaults(func=cmd_interact)
+
+    # shell command
+    shell_parser = subparsers.add_parser("shell", help="Open shell in workflow container")
+    shell_parser.add_argument("workflow_id", help="Workflow ID")
+    shell_parser.add_argument("--executor", action="store_true", help="Open shell in executor instead of planner")
+    shell_parser.add_argument("--shell", default="/bin/bash", help="Shell to use (default: /bin/bash)")
+    shell_parser.set_defaults(func=cmd_shell)
 
     # Parse args
     args = parser.parse_args()

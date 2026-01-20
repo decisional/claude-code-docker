@@ -283,3 +283,87 @@ class DockerManager:
             time.sleep(check_interval)
 
         logger.info("Resume file detected, agent can continue")
+
+    def start_interactive_session(
+        self,
+        container_id: str,
+        agent_type: AgentType,
+        context_prompt: Optional[str] = None
+    ):
+        """
+        Start an interactive session with the agent in the running container.
+
+        This allows the user to chat directly with the agent for complex discussions.
+        """
+        logger.info(f"Starting interactive session in container {container_id[:12]}")
+
+        # Determine which CLI to use
+        cli_command = agent_type.value  # "claude" or "codex"
+
+        # Build docker exec command for interactive session
+        cmd = [
+            "docker", "exec",
+            "-it",  # Interactive with TTY
+            container_id,
+            cli_command
+        ]
+
+        # Add context prompt if provided
+        if context_prompt:
+            cmd.append(context_prompt)
+
+        print("\n" + "="*60)
+        print("🎯 INTERACTIVE MODE")
+        print("="*60)
+        print(f"Opening interactive session with {agent_type.value}...")
+        if context_prompt:
+            print(f"\nContext: {context_prompt[:100]}...")
+        print("\nYou can now chat directly with the agent.")
+        print("When done, type 'exit' or press Ctrl+D to return.")
+        print("="*60 + "\n")
+
+        # Run interactive session (blocks until user exits)
+        try:
+            subprocess.run(cmd, check=False)
+        except KeyboardInterrupt:
+            print("\n\nInteractive session interrupted.")
+        except Exception as e:
+            logger.error(f"Failed to start interactive session: {e}")
+            raise
+
+        print("\n" + "="*60)
+        print("Interactive session ended.")
+        print("="*60 + "\n")
+
+    def open_shell_in_container(self, container_id: str, shell: str = "/bin/bash"):
+        """
+        Open a shell in the running container for manual inspection/interaction.
+        """
+        logger.info(f"Opening shell in container {container_id[:12]}")
+
+        cmd = [
+            "docker", "exec",
+            "-it",
+            container_id,
+            shell
+        ]
+
+        print("\n" + "="*60)
+        print("🐚 SHELL MODE")
+        print("="*60)
+        print(f"Opening {shell} in container...")
+        print("\nYou have full shell access to the container.")
+        print("Type 'exit' to return.")
+        print("="*60 + "\n")
+
+        try:
+            subprocess.run(cmd, check=False)
+        except KeyboardInterrupt:
+            print("\n\nShell session interrupted.")
+        except Exception as e:
+            logger.error(f"Failed to open shell: {e}")
+            raise
+
+        print("\n" + "="*60)
+        print("Shell session ended.")
+        print("="*60 + "\n")

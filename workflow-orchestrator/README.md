@@ -104,15 +104,27 @@ This will:
 
 ### Respond to blocked workflow
 
-When a workflow is blocked (waiting for human input):
+**Option 1: Async Response** (quick, for simple decisions)
 
 ```bash
-# Interactive mode
+# Interactive prompt
 ./workflow respond wf_abc123
 
 # Or provide response directly
 ./workflow respond wf_abc123 -r "Use PostgreSQL"
 ```
+
+**Option 2: Interactive Chat** (for complex discussions)
+
+```bash
+# Jump into live chat with the agent
+./workflow interact wf_abc123
+
+# You can discuss the problem, explore options together
+# When done, save your decision and agent continues
+```
+
+See [INTERACTIVE_MODE.md](INTERACTIVE_MODE.md) for full details on live chat sessions.
 
 ### View container logs
 
@@ -132,6 +144,18 @@ When a workflow is blocked (waiting for human input):
 ```bash
 ./workflow cancel wf_abc123
 ```
+
+### Interactive mode (jump into terminal)
+
+```bash
+# Chat directly with the agent
+./workflow interact wf_abc123
+
+# Open a shell in the container
+./workflow shell wf_abc123
+```
+
+Interactive mode is perfect for complex discussions where you want to chat back-and-forth with the agent instead of just providing a one-time response. See [INTERACTIVE_MODE.md](INTERACTIVE_MODE.md) for details.
 
 ## Configuration
 

@@ -23,6 +23,7 @@ Automate your entire development workflow from Linear ticket to Pull Request!
 - 🎯 Configurable planner and executor models (Codex/Claude)
 - 🔍 Real-time monitoring and logging
 - ⏸️ Graceful blocking when agents need human input
+- 💬 Interactive mode: Jump into terminal and chat with agent
 - 📊 Track multiple workflows in parallel
 - 🔗 Automatic PR creation and Linear ticket updates
 
