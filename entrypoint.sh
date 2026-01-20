@@ -79,13 +79,14 @@ if [ -n "$GIT_REPO_URL" ]; then
 
     # Check if repository already exists
     if [ -d "$TARGET_DIR/.git" ]; then
-        echo "✓ Repository already exists at $TARGET_DIR"
-        echo "  Skipping clone - using existing repository"
+        # Repository already cloned, check if this is a reconnection or first-time setup
+        SETUP_MARKER="/workspace/.initial-setup-complete"
+        if [ -f "$SETUP_MARKER" ]; then
+            # This is a reconnection to an existing container
+            echo "Using existing repository at $TARGET_DIR"
+        fi
+        # Otherwise, this is the second entrypoint call during initial setup - don't print anything
         cd "$TARGET_DIR"
-
-        # Show current branch info
-        CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-        echo "  Current branch: $CURRENT_BRANCH"
     else
         # Repository doesn't exist or is not a valid git repo - clone it
 
@@ -203,10 +204,16 @@ if [ -n "$GIT_REPO_URL" ]; then
             go mod download 2>&1 || echo "⚠ go mod download had warnings (continuing anyway)"
             echo "✓ Go dependencies installed"
         fi
+
+        # Mark initial setup as complete
+        touch /workspace/.initial-setup-complete
     fi
 else
     echo "No git repository configured (GIT_REPO_URL not set)"
 fi
+
+# Mark initial setup as complete (even if no git repo configured)
+touch /workspace/.initial-setup-complete 2>/dev/null || true
 
 echo ""
 echo "Working directory: $(pwd)"
