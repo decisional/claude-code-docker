@@ -11,10 +11,12 @@ Linear Ticket → Planner Agent → Implementation Plan → Executor Agent → P
 The orchestrator:
 1. Fetches ticket details from Linear (including screenshots/attachments)
 2. **Downloads and prepares screenshots** so agents can see visual requirements
-3. Spins up a planner agent (Codex or Claude) to create an implementation plan
-4. Spins up an executor agent (Claude or Codex) to implement the plan
-5. Monitors progress and handles human-in-the-loop when agents need input
-6. Creates a PR and updates the Linear ticket
+3. **Planner agent** (Codex) creates an implementation plan
+4. **Executor agent** (Claude) implements the plan
+5. **Reviewer agent** (Codex) reviews the code
+   - If approved → Claude creates PR with detailed description
+   - If issues found → Sends feedback to executor → Executor fixes → Review again (max 3 iterations)
+6. Updates the Linear ticket with PR link
 
 ### 🖼️ Screenshot Handling
 
@@ -27,6 +29,15 @@ Agents can **see and analyze** screenshots from Linear tickets:
 - Visual requirements (UI layouts, colors, spacing) are properly analyzed
 
 See [SCREENSHOTS.md](../SCREENSHOT_HANDLING.md) for full details on how screenshot handling works.
+
+### 🤖 Agent Responsibilities
+
+**Planner (Codex)**: Creates detailed implementation plans
+**Executor (Claude)**: Implements code, fixes issues based on review
+**Reviewer (Codex)**: Reviews code quality, finds bugs and issues
+**PR Creator (Claude)**: Writes detailed, high-quality PR descriptions
+
+All agents run in a **single container** sequentially via `docker exec`.
 
 ## Setup
 

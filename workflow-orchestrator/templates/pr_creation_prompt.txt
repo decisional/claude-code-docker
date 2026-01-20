@@ -1,0 +1,123 @@
+You are creating a pull request for the implementation that has been completed and reviewed.
+
+## Context
+
+- Linear Ticket: Available at `/workspace/linear-ticket.md`
+- Implementation Plan: Available at `/workspace/plan.md`
+- Review Status: Code has been reviewed and approved
+- All changes are committed and pushed to the branch
+
+## Your Task
+
+Create a pull request with a **detailed, high-quality description**.
+
+### PR Description Requirements
+
+Your PR description should include:
+
+1. **Summary** (2-3 sentences)
+   - What was implemented and why
+   - Reference the Linear ticket
+
+2. **Changes** (Bullet list)
+   - Key files added or modified
+   - Major functionality implemented
+   - Any architectural decisions made
+
+3. **Implementation Details**
+   - Technical approach taken
+   - Important design decisions
+   - Any tradeoffs or considerations
+
+4. **Testing** (if applicable)
+   - How changes were tested
+   - Edge cases covered
+   - Manual testing performed
+
+5. **Screenshots** (if UI changes)
+   - Include before/after if applicable
+   - Reference original mockups from ticket
+
+6. **Related**
+   - Link to Linear ticket (Closes DEC-XXX)
+   - Any related issues or dependencies
+
+7. **Notes** (optional)
+   - Important implementation details
+   - Future improvements
+   - Known limitations
+
+### Example PR Description
+
+```markdown
+## Summary
+
+Implemented user export feature as requested in DEC-123. Users can now export their data in CSV and JSON formats with proper rate limiting and error handling.
+
+## Changes
+
+- Added `/api/export` endpoint with format parameter
+- Created `UserExportService` to handle data transformation
+- Implemented rate limiting (max 5 exports per hour per user)
+- Added export buttons to user profile page
+- Updated database schema for export tracking
+
+## Implementation Details
+
+Used a streaming approach for large datasets to avoid memory issues. The export service:
+- Fetches user data in chunks of 1000 records
+- Streams directly to response without loading all in memory
+- Supports both CSV and JSON formats via content negotiation
+
+Rate limiting implemented using Redis with sliding window algorithm.
+
+## Testing
+
+- Manual testing of CSV and JSON exports with datasets of various sizes
+- Verified rate limiting works correctly (tested exceeding limit)
+- Tested error handling for invalid format parameters
+- Confirmed exports work for users with 100k+ records
+
+## Screenshots
+
+UI changes match the mockup from the original ticket:
+[Reference screenshots from /workspace/attachments/ if any]
+
+## Related
+
+Closes DEC-123
+
+## Notes
+
+- Used `json-2-csv` library for CSV generation
+- Export files are generated on-demand (not cached)
+- Future enhancement: Add Excel format support
+- Future enhancement: Email large exports instead of direct download
+
+## Review Notes
+
+Code has been reviewed and approved by the review agent.
+```
+
+## Instructions
+
+1. Review the implementation by checking git diff and modified files
+2. Read the Linear ticket for context
+3. Read the plan to understand the approach
+4. Create a comprehensive PR description following the format above
+5. Use the `gh pr create` command to create the pull request
+6. Signal completion with the PR URL
+
+## Signal Completion
+
+After creating the PR, create `/workspace/.workflow-status.json`:
+```json
+{
+  "status": "complete",
+  "message": "PR created: https://github.com/org/repo/pull/XXX"
+}
+```
+
+---
+
+**Now begin**: Review the implementation and create a detailed pull request.

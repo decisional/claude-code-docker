@@ -24,18 +24,16 @@ Your task is to implement the plan that was created by the planner agent.
    - Write clean, well-documented code
    - Ensure all changes are tested
 
-4. **Create a PR**: Once implementation is complete:
-   - Commit your changes with a clear commit message
+4. **Commit your changes**: Once implementation is complete:
+   - Commit all changes with a clear commit message
    - Push to the branch
-   - Create a pull request with a detailed description
-   - The PR description should reference the Linear ticket
+   - **Do NOT create a PR yet** - a review phase will happen first
 
-5. **Signal completion**: After the PR is created, create `/workspace/.workflow-status.json`:
+5. **Signal completion**: After implementation is complete, create `/workspace/.workflow-status.json`:
 ```json
 {
   "status": "complete",
-  "message": "PR created: https://github.com/org/repo/pull/123",
-  "output_file": "implementation complete"
+  "message": "Implementation complete, ready for review"
 }
 ```
 
@@ -74,41 +72,13 @@ Create `/workspace/.workflow-status.json`:
 }
 ```
 
-## PR Description Format
-
-Your PR description should include:
-
-1. **Summary**: What was implemented (2-3 sentences)
-2. **Changes**: Bullet list of key changes
-3. **Testing**: How the changes were tested
-4. **Linear ticket**: Link to the original ticket
-5. **Notes**: Any important implementation decisions or concerns
-
-Example:
-```markdown
-## Summary
-Implemented user export feature as requested in DEC-123. Users can now export their data in CSV and JSON formats.
-
-## Changes
-- Added `/api/export` endpoint
-- Created `UserExportService` to handle data transformation
-- Added export buttons to user profile page
-- Implemented rate limiting for export requests
-
-## Testing
-- Manual testing of CSV and JSON exports
-- Verified rate limiting works correctly
-- Tested with various user data sizes
-
-## Related
-Closes DEC-123
-
-## Notes
-Used streaming approach for large datasets to avoid memory issues.
-```
-
 ---
 
 **Now begin**: Read `/workspace/plan.md` and implement the changes according to the plan.
 
-Remember to create a PR when you're done and signal completion with the status file!
+Remember:
+- Focus on implementation quality
+- Commit and push your changes
+- Signal completion when done
+- A review phase will happen before PR creation
+

@@ -463,14 +463,14 @@ class WorkflowManager:
         container_id = workflow.container_id
         workflow_dir = Path(workflow.workflow_dir)
 
-        # Execute PR creation command
-        pr_prompt = "Create a pull request with a detailed description based on the implementation. Include review notes if available."
+        # Load PR creation prompt (uses Claude for detailed descriptions)
+        pr_prompt = self._get_pr_creation_prompt(workflow)
 
         try:
-            # Use same agent to create PR
+            # Use executor agent (Claude) to create PR with detailed description
             self.docker_manager.exec_agent_in_container(
                 container_id=workflow.container_id,
-                agent_type=workflow.executor_model,
+                agent_type=workflow.executor_model,  # Claude writes best PR descriptions
                 prompt=pr_prompt,
                 detached=True
             )
@@ -732,6 +732,34 @@ If NEEDS_REWORK, create /workspace/.review-feedback.json with issues, then:
             iteration=workflow.review_iteration,
             max_iterations=workflow.max_review_iterations
         )
+
+        return template
+
+    def _get_pr_creation_prompt(self, workflow: Workflow) -> str:
+        """Generate prompt for PR creation (uses executor agent - Claude)."""
+        template_path = Path(__file__).parent.parent / "templates" / "pr_creation_prompt.txt"
+
+        if template_path.exists():
+            with open(template_path, 'r') as f:
+                template = f.read()
+        else:
+            template = """Create a pull request with a detailed description.
+
+Review the implementation:
+- Check git diff for changes
+- Read /workspace/plan.md for context
+- Read /workspace/linear-ticket.md for requirements
+
+Create a comprehensive PR description with:
+1. Summary (what was implemented)
+2. Changes (key files and features)
+3. Testing (how it was verified)
+4. Related (link to Linear ticket)
+
+Use `gh pr create` to create the PR.
+
+Signal completion with .workflow-status.json containing the PR URL.
+"""
 
         return template
 
