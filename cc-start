@@ -77,20 +77,10 @@ else
         echo "   (Cloning repository and installing dependencies)"
         echo ""
 
-        # Follow logs until we see a completion marker
-        # Use timeout to avoid hanging forever
-        timeout 600 docker logs -f "$CONTAINER_NAME" 2>&1 | while IFS= read -r line; do
+        # Follow logs until we see the completion marker
+        docker logs -f "$CONTAINER_NAME" 2>&1 | while IFS= read -r line; do
             echo "   $line"
-            # Check for completion markers
-            if echo "$line" | grep -q "Repository cloned successfully\|Repository already exists\|No git repository configured"; then
-                # Wait a bit more for dependency installation to finish
-                sleep 3
-                # Check if dependencies are done
-                if docker logs "$CONTAINER_NAME" 2>&1 | tail -20 | grep -q "Working directory:"; then
-                    break
-                fi
-            fi
-            # Also break if we see the working directory message (means setup is done)
+            # Break when we see the working directory message (means setup is done)
             if echo "$line" | grep -q "Working directory:"; then
                 break
             fi
