@@ -2,6 +2,51 @@
 
 A Docker container with Claude Code CLI, OpenAI Codex CLI, and Git pre-installed. Run either Claude Code or Codex in isolated containers with full GitHub integration.
 
+## ⚡ NEW: Workflow Orchestrator
+
+Automate your entire development workflow from Linear ticket to Pull Request!
+
+```bash
+# One command to go from ticket to PR
+./workflow start DEC-123
+
+# The orchestrator will:
+# 1. Fetch ticket from Linear (with screenshots)
+# 2. Create an implementation plan (using Codex/Claude)
+# 3. Implement the changes (using Claude/Codex)
+# 4. Create a PR and update Linear ticket
+```
+
+**Features:**
+- 🤖 Fully autonomous workflow (with human-in-the-loop when needed)
+- 📋 Fetches Linear tickets with attachments
+- 🎯 Configurable planner and executor models (Codex/Claude)
+- 🔍 Real-time monitoring and logging
+- ⏸️ Graceful blocking when agents need human input
+- 📊 Track multiple workflows in parallel
+- 🔗 Automatic PR creation and Linear ticket updates
+
+**Quick Start:**
+```bash
+# Setup (one-time)
+cd workflow-orchestrator
+./setup.sh
+export LINEAR_API_KEY="your_api_key"
+cd ..
+
+# Start a workflow
+./workflow start DEC-123
+
+# Monitor workflows
+./workflow list
+./workflow show wf_abc123
+./workflow logs wf_abc123
+```
+
+See [workflow-orchestrator/README.md](workflow-orchestrator/README.md) for full documentation.
+
+---
+
 ## Prerequisites
 
 - Docker and Docker Compose installed

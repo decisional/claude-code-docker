@@ -1,0 +1,38 @@
+# Workflow Orchestrator Configuration
+# Copy this file to config.yaml and fill in your values
+
+# Linear API Configuration
+# Get your API key from: https://linear.app/settings/api
+linear_api_key: "lin_api_your_key_here"
+linear_team_id: null  # Optional: filter to specific team
+
+# Git Repository
+repo_url: "git@github.com:your-org/your-repo.git"
+base_branch: "main"
+
+# Model Selection
+# Options: "claude" or "codex"
+default_planner: "codex"
+default_executor: "claude"
+
+# Docker Configuration
+docker_image: "llm-docker-claude-code:latest"
+workspace_base: "/workspace"
+
+# File Paths
+workflows_dir: "./workflows"
+db_path: "./workflow.db"
+
+# Timeouts (minutes)
+planning_timeout: 30
+execution_timeout: 120
+container_check_interval: 5  # seconds
+
+# Notifications (optional)
+slack_webhook_url: null
+notify_on_block: true
+notify_on_complete: true
+
+# GitHub Token (for PR creation)
+# Get from: https://github.com/settings/tokens (needs 'repo' scope)
+github_token: null  # Optional: use existing gh CLI auth instead
