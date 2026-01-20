@@ -1,7 +1,7 @@
 #!/bin/bash
 # Start a new Codex CLI instance or attach to existing one
 # Usage: ./codex-start [instance-name] [--branch branch-name]
-# If no name provided, uses current directory name
+# If no name provided, generates a random name like "happy-tiger"
 
 set -e
 
@@ -22,9 +22,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Get instance name from argument or use current directory name
+# Get instance name from argument or generate a random one
 if [ -z "$INSTANCE_NAME" ]; then
-    INSTANCE_NAME=$(basename "$(pwd)")
+    # Generate a nice random name (adjective-noun combination)
+    ADJECTIVES=(happy swift clever bright calm cool bold quick wise gentle noble proud brave kind)
+    NOUNS=(tiger lion eagle fox wolf bear hawk deer owl raven falcon dolphin dragon phoenix)
+
+    # Get random indices
+    ADJ_INDEX=$((RANDOM % ${#ADJECTIVES[@]}))
+    NOUN_INDEX=$((RANDOM % ${#NOUNS[@]}))
+
+    INSTANCE_NAME="${ADJECTIVES[$ADJ_INDEX]}-${NOUNS[$NOUN_INDEX]}"
 fi
 
 PROJECT_NAME="codex-${INSTANCE_NAME}"
