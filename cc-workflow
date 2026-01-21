@@ -366,6 +366,76 @@ cmd_cleanup() {
     echo ""
 }
 
+# Function to view workflow files
+cmd_view() {
+    local ticket_id=$1
+    local file=$2
+
+    if [ -z "$ticket_id" ]; then
+        log_error "Ticket ID required"
+        echo "Usage: ./cc-workflow view <ticket-id> [file]"
+        echo ""
+        echo "Available files:"
+        echo "  ticket    - Linear ticket details"
+        echo "  plan      - Implementation plan"
+        echo "  response  - Executor response"
+        echo "  review    - Reviewer feedback"
+        echo "  logs      - List agent logs"
+        exit 1
+    fi
+
+    if [ ! -d "$WORKFLOW_DATA_DIR/$ticket_id" ]; then
+        log_error "Workflow for ticket $ticket_id not found"
+        exit 1
+    fi
+
+    # Sync from container if running
+    local instance_name=$(jq -r '.container_name' "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json" 2>/dev/null || echo "workflow-$(echo $ticket_id | tr '[:upper:]' '[:lower:]')")
+    local project_name="claude-$instance_name"
+    local container_name="${project_name}-claude-code-1"
+
+    if docker ps -q -f name="^${container_name}$" 2>/dev/null | grep -q .; then
+        docker cp "$container_name:/workspace/.workflow-state/$ticket_id/." "$WORKFLOW_DATA_DIR/$ticket_id/" 2>/dev/null || true
+    fi
+
+    case "$file" in
+        ticket|linear-ticket)
+            cat "$WORKFLOW_DATA_DIR/$ticket_id/linear-ticket.md" 2>/dev/null || echo "File not found"
+            ;;
+        plan)
+            cat "$WORKFLOW_DATA_DIR/$ticket_id/plan.md" 2>/dev/null || echo "File not found"
+            ;;
+        response|executor-response)
+            cat "$WORKFLOW_DATA_DIR/$ticket_id/executor-response.md" 2>/dev/null || echo "File not found"
+            ;;
+        review)
+            cat "$WORKFLOW_DATA_DIR/$ticket_id/review.md" 2>/dev/null || echo "File not found"
+            ;;
+        logs)
+            echo "Agent logs:"
+            ls -lht "$WORKFLOW_DATA_DIR/$ticket_id/agent-logs/" 2>/dev/null || echo "No logs found"
+            ;;
+        "")
+            # Show all files
+            echo "Available files for $ticket_id:"
+            echo ""
+            for f in linear-ticket.md plan.md executor-response.md review.md; do
+                if [ -f "$WORKFLOW_DATA_DIR/$ticket_id/$f" ]; then
+                    local size=$(wc -c < "$WORKFLOW_DATA_DIR/$ticket_id/$f")
+                    echo "  $f ($size bytes)"
+                fi
+            done
+            echo ""
+            echo "Use: ./cc-workflow view $ticket_id <file>"
+            ;;
+        *)
+            log_error "Unknown file: $file"
+            echo "Available: ticket, plan, response, review, logs"
+            exit 1
+            ;;
+    esac
+}
+
 # Main command dispatcher
 main() {
     local command=$1
@@ -380,6 +450,9 @@ main() {
             ;;
         status)
             cmd_status "$@"
+            ;;
+        view)
+            cmd_view "$@"
             ;;
         list)
             cmd_list
