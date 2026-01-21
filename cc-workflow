@@ -236,6 +236,16 @@ cmd_status() {
         exit 1
     fi
 
+    # Check if container is running and sync state from it
+    local instance_name=$(jq -r '.container_name' "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json" 2>/dev/null || echo "workflow-$(echo $ticket_id | tr '[:upper:]' '[:lower:]')")
+    local project_name="claude-$instance_name"
+    local container_name="${project_name}-claude-code-1"
+
+    if docker ps -q -f name="^${container_name}$" 2>/dev/null | grep -q .; then
+        log_info "Container running - fetching live state..."
+        docker cp "$container_name:/workspace/.workflow-state/$ticket_id/." "$WORKFLOW_DATA_DIR/$ticket_id/" 2>/dev/null || true
+    fi
+
     local state_file="$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json"
 
     echo ""
