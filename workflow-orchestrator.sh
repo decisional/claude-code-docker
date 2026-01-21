@@ -166,9 +166,30 @@ run_workflow() {
         update_state "EXECUTING" "RUNNING"
 
         if run_agent "executor" "$SCRIPTS_DIR/run-executor.sh" "$STATE_DIR"; then
-            update_state "REVIEWING" "RUNNING"
+            # After execution, create/update PR before review
+            update_state "PR" "RUNNING"
         else
             pause_workflow "Executor agent failed"
+        fi
+    fi
+
+    # Phase: PR - Create or update pull request
+    current_phase=$(get_state_value phase)
+    current_iteration=$(get_state_value iteration)
+
+    if [ "$current_phase" = "PR" ]; then
+        if [ "$current_iteration" -eq 0 ]; then
+            log_phase "Phase 4: Creating Pull Request"
+        else
+            log_phase "Phase 4: Updating Pull Request (Iteration $current_iteration)"
+        fi
+
+        update_state "PR" "RUNNING"
+
+        if run_agent "create-pr" "$SCRIPTS_DIR/create-pr.sh" "$STATE_DIR"; then
+            update_state "REVIEWING" "RUNNING"
+        else
+            pause_workflow "Failed to create/update pull request"
         fi
     fi
 
@@ -177,7 +198,7 @@ run_workflow() {
     current_iteration=$(get_state_value iteration)
 
     if [ "$current_phase" = "REVIEWING" ]; then
-        log_phase "Phase 4: Reviewing (Codex) - Iteration $((current_iteration + 1))"
+        log_phase "Phase 5: Reviewing (Codex) - Review Cycle $((current_iteration + 1))"
 
         update_state "REVIEWING" "RUNNING"
 
@@ -190,7 +211,8 @@ run_workflow() {
 
                 if echo "$review_decision" | grep -q "approve"; then
                     log_success "Changes approved by reviewer!"
-                    update_state "PR" "RUNNING"
+                    update_state "COMPLETED" "COMPLETED"
+                    log_phase "🎉 Workflow Completed Successfully! PR is ready for merge."
                 elif echo "$review_decision" | grep -q "request"; then
                     log_warning "Reviewer requested changes"
 
@@ -198,9 +220,9 @@ run_workflow() {
                     current_iteration=$(get_state_value iteration)
 
                     if [ "$current_iteration" -ge "$max_iterations" ]; then
-                        pause_workflow "Maximum review iterations ($max_iterations) reached"
+                        pause_workflow "Maximum review iterations ($max_iterations) reached - check PR for details"
                     else
-                        log_info "Starting iteration $((current_iteration + 1))"
+                        log_info "Starting review cycle $((current_iteration + 1))"
                         update_state "EXECUTING" "RUNNING"
                     fi
                 else
@@ -211,21 +233,6 @@ run_workflow() {
             fi
         else
             pause_workflow "Reviewer agent failed"
-        fi
-    fi
-
-    # Phase: PR - Create pull request
-    current_phase=$(get_state_value phase)
-    if [ "$current_phase" = "PR" ]; then
-        log_phase "Phase 5: Creating Pull Request"
-
-        update_state "PR" "RUNNING"
-
-        if run_agent "create-pr" "$SCRIPTS_DIR/create-pr.sh" "$STATE_DIR"; then
-            update_state "COMPLETED" "COMPLETED"
-            log_phase "🎉 Workflow Completed Successfully!"
-        else
-            pause_workflow "Failed to create pull request"
         fi
     fi
 
