@@ -20,7 +20,25 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Check if Linear CLI/MCP is available
-if command -v linear &> /dev/null; then
+# Try Claude with Linear MCP first (most common in container)
+if [ -f /usr/local/bin/claude ] || command -v claude &> /dev/null; then
+    # Use Claude with Linear MCP to fetch ticket
+    echo "Using Claude with Linear MCP..."
+
+    FETCH_PROMPT="Use the Linear MCP to fetch issue $TICKET_ID and write a markdown summary to $OUTPUT_FILE. The markdown should include the title, description, status, assignee, project, and any attachments or links. Format it clearly for use by other agents."
+
+    echo "$FETCH_PROMPT" | claude --print --dangerously-skip-permissions 2>&1
+
+    # Verify file was created
+    if [ -f "$OUTPUT_FILE" ]; then
+        echo "✓ Ticket fetched via Linear MCP"
+    else
+        echo "Warning: Linear MCP fetch failed, trying Linear CLI..."
+    fi
+fi
+
+# Fallback to Linear CLI if Claude MCP didn't work
+if [ ! -f "$OUTPUT_FILE" ] && command -v linear &> /dev/null; then
     echo "Using Linear CLI..."
     # Fetch ticket using Linear CLI (if available)
     linear issue view "$TICKET_ID" --format json > /tmp/linear-ticket-$$.json
@@ -53,9 +71,11 @@ Please implement the changes described in this ticket following best practices a
 EOF
 
     rm -f /tmp/linear-ticket-$$.json
+fi
 
-else
-    echo "Warning: Neither Linear CLI nor Claude available"
+# Final fallback: Create placeholder if nothing worked
+if [ ! -f "$OUTPUT_FILE" ]; then
+    echo "Warning: Could not fetch ticket from Linear"
     echo "Creating placeholder ticket..."
 
     # Create placeholder ticket for testing
