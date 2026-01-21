@@ -5,6 +5,7 @@ claude-data/
 codex-data/
 git-data/
 .claude/
+workflow-data/
 
 # Environment and build files
 .env

@@ -4,13 +4,14 @@ FROM node:20-slim
 ARG USER_ID=1000
 ARG GROUP_ID=1000
 
-# Install system dependencies including Git, zsh, and GitHub CLI
+# Install system dependencies including Git, zsh, jq, and GitHub CLI
 RUN apt-get update && apt-get install -y \
     git \
     curl \
     ca-certificates \
     zsh \
     wget \
+    jq \
     libpq-dev \
     build-essential \
     zlib1g-dev \
