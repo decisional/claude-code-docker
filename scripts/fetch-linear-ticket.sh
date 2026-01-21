@@ -19,26 +19,77 @@ echo "  FETCHING LINEAR TICKET: $TICKET_ID"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Check if Linear CLI/MCP is available
-# Try Claude with Linear MCP first (most common in container)
-if [ -f /usr/local/bin/claude ] || command -v claude &> /dev/null; then
-    # Use Claude with Linear MCP to fetch ticket
-    echo "Using Claude with Linear MCP..."
+# Check if Linear API key is available in .claude.json
+LINEAR_API_KEY=""
+if [ -f /home/node/.claude/.claude.json ]; then
+    LINEAR_API_KEY=$(jq -r '.mcpServers."linear-server".env.LINEAR_API_KEY // empty' /home/node/.claude/.claude.json 2>/dev/null)
+fi
 
-    FETCH_PROMPT="Use the Linear MCP to fetch issue $TICKET_ID and write a markdown summary to $OUTPUT_FILE. The markdown should include the title, description, status, assignee, project, and any attachments or links. Format it clearly for use by other agents."
+# Try Linear GraphQL API first if API key is available
+if [ -n "$LINEAR_API_KEY" ]; then
+    echo "Using Linear GraphQL API..."
 
-    # Use --mcp-config to load Linear MCP in print mode
-    echo "$FETCH_PROMPT" | claude --print --dangerously-skip-permissions --mcp-config /home/node/.claude/.claude.json 2>&1
+    # Fetch ticket via GraphQL API
+    GRAPHQL_QUERY=$(cat <<'GRAPHQL_EOF'
+{
+  "query": "query Issue($id: String!) { issue(id: $id) { id identifier title description state { name } assignee { name email } project { name } priority priorityLabel createdAt updatedAt url } }",
+  "variables": {"id": "TICKET_ID_PLACEHOLDER"}
+}
+GRAPHQL_EOF
+    )
 
-    # Verify file was created
-    if [ -f "$OUTPUT_FILE" ]; then
-        echo "✓ Ticket fetched via Linear MCP"
+    # Substitute ticket ID
+    GRAPHQL_QUERY=$(echo "$GRAPHQL_QUERY" | sed "s/TICKET_ID_PLACEHOLDER/$TICKET_ID/g")
+
+    # Make API request
+    RESPONSE=$(curl -s -X POST https://api.linear.app/graphql \
+        -H "Content-Type: application/json" \
+        -H "Authorization: $LINEAR_API_KEY" \
+        -d "$GRAPHQL_QUERY")
+
+    # Parse response and create markdown
+    if echo "$RESPONSE" | jq -e '.data.issue' >/dev/null 2>&1; then
+        TITLE=$(echo "$RESPONSE" | jq -r '.data.issue.title')
+        DESCRIPTION=$(echo "$RESPONSE" | jq -r '.data.issue.description // "No description"')
+        STATE=$(echo "$RESPONSE" | jq -r '.data.issue.state.name // "Unknown"')
+        ASSIGNEE=$(echo "$RESPONSE" | jq -r '.data.issue.assignee.name // "Unassigned"')
+        PROJECT=$(echo "$RESPONSE" | jq -r '.data.issue.project.name // "No project"')
+        PRIORITY=$(echo "$RESPONSE" | jq -r '.data.issue.priorityLabel // "No priority"')
+        URL=$(echo "$RESPONSE" | jq -r '.data.issue.url // ""')
+
+        cat > "$OUTPUT_FILE" <<EOF
+# Linear Ticket: $TICKET_ID
+
+**Title:** $TITLE
+
+**Status:** $STATE
+
+**Assignee:** $ASSIGNEE
+
+**Project:** $PROJECT
+
+**Priority:** $PRIORITY
+
+**URL:** $URL
+
+## Description
+
+$DESCRIPTION
+
+## Instructions
+
+Please implement the changes described in this ticket following best practices and ensuring all requirements are met.
+EOF
+
+        echo "✓ Ticket fetched via Linear API"
     else
-        echo "Warning: Linear MCP fetch failed, trying Linear CLI..."
+        echo "Warning: Linear API fetch failed, trying Linear CLI..."
+        ERROR_MSG=$(echo "$RESPONSE" | jq -r '.errors[0].message // "Unknown error"')
+        echo "  Error: $ERROR_MSG"
     fi
 fi
 
-# Fallback to Linear CLI if Claude MCP didn't work
+# Fallback to Linear CLI if API didn't work
 if [ ! -f "$OUTPUT_FILE" ] && command -v linear &> /dev/null; then
     echo "Using Linear CLI..."
     # Fetch ticket using Linear CLI (if available)
