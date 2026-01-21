@@ -211,6 +211,15 @@ run_workflow() {
 
                 if echo "$review_decision" | grep -q "approve"; then
                     log_success "Changes approved by reviewer!"
+
+                    # Mark PR as ready for review
+                    log_info "Marking PR as ready for review..."
+                    if bash "$SCRIPTS_DIR/mark-pr-ready.sh" "$STATE_DIR" 2>&1; then
+                        log_success "PR marked as ready"
+                    else
+                        log_warning "Could not mark PR as ready (may need manual action)"
+                    fi
+
                     update_state "COMPLETED" "COMPLETED"
                     log_phase "🎉 Workflow Completed Successfully! PR is ready for merge."
                 elif echo "$review_decision" | grep -q "request"; then
