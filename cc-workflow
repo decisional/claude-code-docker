@@ -1,0 +1,429 @@
+#!/bin/bash
+# Multi-agent workflow orchestrator for Claude Code + Codex
+# Usage:
+#   ./cc-workflow start <linear-ticket-id>    - Start new workflow
+#   ./cc-workflow resume <ticket-id>          - Resume paused workflow
+#   ./cc-workflow status <ticket-id>          - Show workflow status
+#   ./cc-workflow list                        - List all workflows
+#   ./cc-workflow cleanup <ticket-id>         - Remove workflow data + container
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKFLOW_DATA_DIR="$SCRIPT_DIR/workflow-data"
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Helper function to print colored output
+log_info() {
+    echo -e "${BLUE}ℹ${NC}  $1"
+}
+
+log_success() {
+    echo -e "${GREEN}✓${NC}  $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}⚠${NC}  $1"
+}
+
+log_error() {
+    echo -e "${RED}✗${NC}  $1"
+}
+
+# Function to create workflow directory structure
+init_workflow_dir() {
+    local ticket_id=$1
+    local workflow_dir="$WORKFLOW_DATA_DIR/$ticket_id"
+
+    mkdir -p "$workflow_dir/agent-logs"
+
+    # Initialize workflow state (container name must be lowercase)
+    local instance_name="workflow-$(echo $ticket_id | tr '[:upper:]' '[:lower:]')"
+    cat > "$workflow_dir/workflow-state.json" <<EOF
+{
+  "ticket_id": "$ticket_id",
+  "phase": "INIT",
+  "status": "RUNNING",
+  "iteration": 0,
+  "max_iterations": 3,
+  "created_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "updated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "error": null,
+  "container_name": "$instance_name"
+}
+EOF
+
+    log_success "Workflow directory initialized: $workflow_dir"
+}
+
+# Function to start a new workflow
+cmd_start() {
+    local ticket_id=$1
+
+    if [ -z "$ticket_id" ]; then
+        log_error "Linear ticket ID required"
+        echo "Usage: ./cc-workflow start <linear-ticket-id>"
+        exit 1
+    fi
+
+    # Check if workflow already exists
+    if [ -d "$WORKFLOW_DATA_DIR/$ticket_id" ]; then
+        log_warning "Workflow for ticket $ticket_id already exists"
+        log_info "Use './cc-workflow resume $ticket_id' to continue"
+        exit 1
+    fi
+
+    echo ""
+    log_info "Starting autonomous workflow for Linear ticket: $ticket_id"
+    echo ""
+
+    # Create workflow directory structure
+    init_workflow_dir "$ticket_id"
+
+    # Generate container/project name (lowercase for docker-compose)
+    local instance_name="workflow-$(echo $ticket_id | tr '[:upper:]' '[:lower:]')"
+    local project_name="claude-$instance_name"
+    local container_name="${project_name}-claude-code-1"
+
+    log_info "Container: $container_name"
+    echo ""
+
+    # Start container with workflow orchestrator
+    log_info "Creating container..."
+    docker-compose -p "$project_name" up -d
+
+    # Wait for repository clone
+    log_info "Waiting for repository setup..."
+    echo ""
+
+    docker logs -f "$container_name" 2>&1 | while IFS= read -r line; do
+        echo "   $line"
+        if echo "$line" | grep -q "Repository cloned successfully!"; then
+            break
+        fi
+        if echo "$line" | grep -q "No git repository configured"; then
+            break
+        fi
+    done
+
+    echo ""
+    log_success "Container ready"
+
+    # Copy workflow orchestrator script into container
+    log_info "Installing workflow orchestrator..."
+    docker cp "$SCRIPT_DIR/workflow-orchestrator.sh" "$container_name:/workspace/workflow-orchestrator.sh"
+    docker exec "$container_name" chmod +x /workspace/workflow-orchestrator.sh
+
+    # Copy agent scripts
+    docker exec "$container_name" mkdir -p /workspace/.workflow-scripts
+    docker cp "$SCRIPT_DIR/scripts/." "$container_name:/workspace/.workflow-scripts/"
+    docker exec "$container_name" sh -c "chmod +x /workspace/.workflow-scripts/*.sh"
+
+    # Mount workflow-data directory
+    log_info "Mounting workflow data..."
+    docker exec "$container_name" mkdir -p "/workspace/.workflow-state/$ticket_id"
+    docker cp "$WORKFLOW_DATA_DIR/$ticket_id/." "$container_name:/workspace/.workflow-state/$ticket_id/"
+
+    echo ""
+    log_success "Workflow initialized"
+    log_info "Starting orchestrator..."
+    echo ""
+
+    # Run workflow orchestrator in container
+    docker exec "$container_name" /workspace/workflow-orchestrator.sh "$ticket_id"
+
+    # Copy back workflow state after completion
+    docker cp "$container_name:/workspace/.workflow-state/$ticket_id/." "$WORKFLOW_DATA_DIR/$ticket_id/"
+
+    # Check final status
+    local final_status=$(jq -r '.status' "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json")
+
+    echo ""
+    if [ "$final_status" = "COMPLETED" ]; then
+        log_success "Workflow completed successfully!"
+    elif [ "$final_status" = "PAUSED" ]; then
+        log_warning "Workflow paused (error or manual intervention required)"
+        log_info "Use './cc-workflow resume $ticket_id' to continue"
+    else
+        log_error "Workflow ended with status: $final_status"
+    fi
+}
+
+# Function to resume a paused workflow
+cmd_resume() {
+    local ticket_id=$1
+
+    if [ -z "$ticket_id" ]; then
+        log_error "Ticket ID required"
+        echo "Usage: ./cc-workflow resume <ticket-id>"
+        exit 1
+    fi
+
+    if [ ! -d "$WORKFLOW_DATA_DIR/$ticket_id" ]; then
+        log_error "Workflow for ticket $ticket_id not found"
+        exit 1
+    fi
+
+    local workflow_status=$(jq -r '.status' "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json")
+
+    if [ "$workflow_status" != "PAUSED" ]; then
+        log_warning "Workflow is not paused (current status: $workflow_status)"
+        log_info "Nothing to resume"
+        exit 0
+    fi
+
+    echo ""
+    log_info "Resuming workflow for ticket: $ticket_id"
+    echo ""
+
+    local instance_name=$(jq -r '.container_name' "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json")
+    local project_name="claude-$instance_name"
+    local container_name="${project_name}-claude-code-1"
+
+    # Check if container is running
+    if ! docker ps -q -f name="^${container_name}$" 2>/dev/null | grep -q .; then
+        log_info "Starting container..."
+        docker-compose -p "$project_name" start
+    fi
+
+    # Update status to RUNNING
+    jq '.status = "RUNNING" | .updated_at = "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"' \
+        "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json" > "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json.tmp"
+    mv "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json.tmp" "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json"
+
+    # Copy updated state to container
+    docker exec "$container_name" mkdir -p "/workspace/.workflow-state/$ticket_id"
+    docker cp "$WORKFLOW_DATA_DIR/$ticket_id/." "$container_name:/workspace/.workflow-state/$ticket_id/"
+
+    log_info "Resuming orchestrator..."
+    echo ""
+
+    # Resume workflow orchestrator
+    docker exec "$container_name" /workspace/workflow-orchestrator.sh "$ticket_id"
+
+    # Copy back workflow state
+    docker cp "$container_name:/workspace/.workflow-state/$ticket_id/." "$WORKFLOW_DATA_DIR/$ticket_id/"
+
+    local final_status=$(jq -r '.status' "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json")
+
+    echo ""
+    if [ "$final_status" = "COMPLETED" ]; then
+        log_success "Workflow completed successfully!"
+    elif [ "$final_status" = "PAUSED" ]; then
+        log_warning "Workflow paused again"
+        log_info "Use './cc-workflow resume $ticket_id' to continue"
+    fi
+}
+
+# Function to show workflow status
+cmd_status() {
+    local ticket_id=$1
+
+    if [ -z "$ticket_id" ]; then
+        log_error "Ticket ID required"
+        echo "Usage: ./cc-workflow status <ticket-id>"
+        exit 1
+    fi
+
+    if [ ! -d "$WORKFLOW_DATA_DIR/$ticket_id" ]; then
+        log_error "Workflow for ticket $ticket_id not found"
+        exit 1
+    fi
+
+    local state_file="$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json"
+
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo " Workflow Status: $ticket_id"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+
+    jq -r '
+        "  Ticket ID:      \(.ticket_id)",
+        "  Phase:          \(.phase)",
+        "  Status:         \(.status)",
+        "  Iteration:      \(.iteration)/\(.max_iterations)",
+        "  Created:        \(.created_at)",
+        "  Updated:        \(.updated_at)",
+        "  Container:      \(.container_name)",
+        (if .error then "  Error:          \(.error)" else "" end)
+    ' "$state_file" | grep -v '^$'
+
+    echo ""
+    echo "Files:"
+    echo "─────────────────────────────────────────────────────────"
+
+    for file in linear-ticket.md plan.md executor-response.md review.md; do
+        if [ -f "$WORKFLOW_DATA_DIR/$ticket_id/$file" ]; then
+            local size=$(wc -c < "$WORKFLOW_DATA_DIR/$ticket_id/$file" | tr -d ' ')
+            printf "  %-25s ${GREEN}✓${NC} (%s bytes)\n" "$file" "$size"
+        else
+            printf "  %-25s ${YELLOW}-${NC}\n" "$file"
+        fi
+    done
+
+    echo ""
+}
+
+# Function to list all workflows
+cmd_list() {
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo " All Workflows"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+
+    if [ ! -d "$WORKFLOW_DATA_DIR" ] || [ -z "$(ls -A "$WORKFLOW_DATA_DIR" 2>/dev/null)" ]; then
+        log_info "No workflows found"
+        echo ""
+        return
+    fi
+
+    printf "%-20s %-15s %-10s %s\n" "TICKET ID" "STATUS" "PHASE" "UPDATED"
+    echo "───────────────────────────────────────────────────────────"
+
+    for workflow_dir in "$WORKFLOW_DATA_DIR"/*; do
+        if [ -f "$workflow_dir/workflow-state.json" ]; then
+            jq -r '"\(.ticket_id)|\(.status)|\(.phase)|\(.updated_at)"' \
+                "$workflow_dir/workflow-state.json" | \
+            while IFS='|' read -r ticket status phase updated; do
+                # Color code status
+                case "$status" in
+                    "COMPLETED") status_color="${GREEN}$status${NC}" ;;
+                    "PAUSED") status_color="${YELLOW}$status${NC}" ;;
+                    "RUNNING") status_color="${BLUE}$status${NC}" ;;
+                    "FAILED") status_color="${RED}$status${NC}" ;;
+                    *) status_color="$status" ;;
+                esac
+
+                # Trim timestamp for display
+                updated_short=$(echo "$updated" | cut -d'T' -f1,2 | tr 'T' ' ')
+
+                printf "%-20s %-24s %-10s %s\n" "$ticket" "$status_color" "$phase" "$updated_short"
+            done
+        fi
+    done
+
+    echo ""
+}
+
+# Function to cleanup workflow
+cmd_cleanup() {
+    local ticket_id=$1
+
+    if [ -z "$ticket_id" ]; then
+        log_error "Ticket ID required"
+        echo "Usage: ./cc-workflow cleanup <ticket-id>"
+        exit 1
+    fi
+
+    if [ ! -d "$WORKFLOW_DATA_DIR/$ticket_id" ]; then
+        log_error "Workflow for ticket $ticket_id not found"
+        exit 1
+    fi
+
+    echo ""
+    log_warning "This will remove all workflow data and stop the container"
+    read -p "Are you sure? (y/N): " -n 1 -r
+    echo ""
+
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Cancelled"
+        exit 0
+    fi
+
+    local instance_name=$(jq -r '.container_name' "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json")
+    local project_name="claude-$instance_name"
+
+    # Stop and remove container
+    log_info "Stopping container..."
+    docker-compose -p "$project_name" down 2>/dev/null || true
+
+    # Remove Docker network
+    docker network rm "${project_name}_default" 2>/dev/null || true
+
+    # Remove workflow data
+    log_info "Removing workflow data..."
+    rm -rf "$WORKFLOW_DATA_DIR/$ticket_id"
+
+    log_success "Workflow cleaned up: $ticket_id"
+    echo ""
+}
+
+# Main command dispatcher
+main() {
+    local command=$1
+    shift
+
+    case "$command" in
+        start)
+            cmd_start "$@"
+            ;;
+        resume)
+            cmd_resume "$@"
+            ;;
+        status)
+            cmd_status "$@"
+            ;;
+        list)
+            cmd_list
+            ;;
+        cleanup)
+            cmd_cleanup "$@"
+            ;;
+        help|--help|-h|"")
+            cat <<EOF
+
+Multi-Agent Autonomous Workflow System
+
+Usage:
+  ./cc-workflow start <linear-ticket-id>    Start new workflow from Linear ticket
+  ./cc-workflow resume <ticket-id>          Resume paused workflow
+  ./cc-workflow status <ticket-id>          Show workflow status
+  ./cc-workflow list                        List all workflows
+  ./cc-workflow cleanup <ticket-id>         Remove workflow and container
+  ./cc-workflow help                        Show this help message
+
+Workflow Phases:
+  1. INIT      - Fetch Linear ticket
+  2. PLANNING  - Codex creates plan.md
+  3. EXECUTING - Claude implements changes
+  4. REVIEWING - Codex reviews changes
+  5. ITERATING - Loop between executor and reviewer
+  6. PR        - Create pull request
+  7. COMPLETED - Workflow done
+
+Status:
+  RUNNING   - Workflow is active
+  PAUSED    - Waiting for manual intervention
+  COMPLETED - Successfully finished
+  FAILED    - Encountered unrecoverable error
+
+Examples:
+  ./cc-workflow start LIN-123
+  ./cc-workflow status LIN-123
+  ./cc-workflow resume LIN-123
+  ./cc-workflow list
+  ./cc-workflow cleanup LIN-123
+
+EOF
+            ;;
+        *)
+            log_error "Unknown command: $command"
+            echo "Run './cc-workflow help' for usage information"
+            exit 1
+            ;;
+    esac
+}
+
+# Ensure workflow-data directory exists
+mkdir -p "$WORKFLOW_DATA_DIR"
+
+# Run main
+main "$@"
