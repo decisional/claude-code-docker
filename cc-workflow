@@ -376,11 +376,12 @@ cmd_view() {
         echo "Usage: ./cc-workflow view <ticket-id> [file]"
         echo ""
         echo "Available files:"
-        echo "  ticket    - Linear ticket details"
-        echo "  plan      - Implementation plan"
-        echo "  response  - Executor response"
-        echo "  review    - Reviewer feedback"
-        echo "  logs      - List agent logs"
+        echo "  ticket         - Linear ticket details"
+        echo "  plan           - Implementation plan"
+        echo "  response       - Executor response"
+        echo "  review         - Reviewer feedback"
+        echo "  logs           - List agent execution logs"
+        echo "  container-logs - Show live container logs"
         exit 1
     fi
 
@@ -412,8 +413,21 @@ cmd_view() {
             cat "$WORKFLOW_DATA_DIR/$ticket_id/review.md" 2>/dev/null || echo "File not found"
             ;;
         logs)
-            echo "Agent logs:"
+            echo "Agent execution logs:"
             ls -lht "$WORKFLOW_DATA_DIR/$ticket_id/agent-logs/" 2>/dev/null || echo "No logs found"
+            ;;
+        container|container-logs)
+            # Show live container logs
+            if docker ps -q -f name="^${container_name}$" 2>/dev/null | grep -q .; then
+                echo "Live container logs (last 100 lines):"
+                echo "───────────────────────────────────────────────────────────"
+                docker logs "$container_name" 2>&1 | tail -n 100
+                echo "───────────────────────────────────────────────────────────"
+                echo ""
+                echo "Use: docker logs -f $container_name  (to follow live)"
+            else
+                echo "Container not running"
+            fi
             ;;
         "")
             # Show all files
