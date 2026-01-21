@@ -27,7 +27,8 @@ if [ -f /usr/local/bin/claude ] || command -v claude &> /dev/null; then
 
     FETCH_PROMPT="Use the Linear MCP to fetch issue $TICKET_ID and write a markdown summary to $OUTPUT_FILE. The markdown should include the title, description, status, assignee, project, and any attachments or links. Format it clearly for use by other agents."
 
-    echo "$FETCH_PROMPT" | claude --print --dangerously-skip-permissions 2>&1
+    # Use --mcp-config to load Linear MCP in print mode
+    echo "$FETCH_PROMPT" | claude --print --dangerously-skip-permissions --mcp-config /home/node/.claude/.claude.json 2>&1
 
     # Verify file was created
     if [ -f "$OUTPUT_FILE" ]; then
