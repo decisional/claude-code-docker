@@ -132,27 +132,17 @@ cmd_start() {
 
     echo ""
     log_success "Workflow initialized"
-    log_info "Starting orchestrator..."
+    log_info "Starting orchestrator in background..."
     echo ""
 
-    # Run workflow orchestrator in container
-    docker exec "$container_name" /workspace/workflow-orchestrator.sh "$ticket_id"
+    # Run workflow orchestrator in container (in background, with logs)
+    local log_file="/workspace/.workflow-state/$ticket_id/orchestrator.log"
+    docker exec -d "$container_name" sh -c "/workspace/workflow-orchestrator.sh '$ticket_id' > $log_file 2>&1"
 
-    # Copy back workflow state after completion
-    docker cp "$container_name:/workspace/.workflow-state/$ticket_id/." "$WORKFLOW_DATA_DIR/$ticket_id/"
-
-    # Check final status
-    local final_status=$(jq -r '.status' "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json")
-
+    log_success "Workflow started in background"
+    log_info "View logs with: ./cc-workflow logs $ticket_id"
+    log_info "Check status with: ./cc-workflow status $ticket_id"
     echo ""
-    if [ "$final_status" = "COMPLETED" ]; then
-        log_success "Workflow completed successfully!"
-    elif [ "$final_status" = "PAUSED" ]; then
-        log_warning "Workflow paused (error or manual intervention required)"
-        log_info "Use './cc-workflow resume $ticket_id' to continue"
-    else
-        log_error "Workflow ended with status: $final_status"
-    fi
 }
 
 # Function to resume a paused workflow
@@ -201,24 +191,17 @@ cmd_resume() {
     docker exec "$container_name" mkdir -p "/workspace/.workflow-state/$ticket_id"
     docker cp "$WORKFLOW_DATA_DIR/$ticket_id/." "$container_name:/workspace/.workflow-state/$ticket_id/"
 
-    log_info "Resuming orchestrator..."
+    log_info "Resuming orchestrator in background..."
     echo ""
 
-    # Resume workflow orchestrator
-    docker exec "$container_name" /workspace/workflow-orchestrator.sh "$ticket_id"
+    # Resume workflow orchestrator (in background, with logs)
+    local log_file="/workspace/.workflow-state/$ticket_id/orchestrator.log"
+    docker exec -d "$container_name" sh -c "/workspace/workflow-orchestrator.sh '$ticket_id' >> $log_file 2>&1"
 
-    # Copy back workflow state
-    docker cp "$container_name:/workspace/.workflow-state/$ticket_id/." "$WORKFLOW_DATA_DIR/$ticket_id/"
-
-    local final_status=$(jq -r '.status' "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json")
-
+    log_success "Workflow resumed in background"
+    log_info "View logs with: ./cc-workflow logs $ticket_id"
+    log_info "Check status with: ./cc-workflow status $ticket_id"
     echo ""
-    if [ "$final_status" = "COMPLETED" ]; then
-        log_success "Workflow completed successfully!"
-    elif [ "$final_status" = "PAUSED" ]; then
-        log_warning "Workflow paused again"
-        log_info "Use './cc-workflow resume $ticket_id' to continue"
-    fi
 }
 
 # Function to show workflow status
@@ -382,6 +365,8 @@ cmd_view() {
         echo "  review         - Reviewer feedback"
         echo "  logs           - List agent execution logs"
         echo "  container-logs - Show live container logs"
+        echo ""
+        echo "Tip: Use './cc-workflow logs <ticket-id>' to view orchestrator logs"
         exit 1
     fi
 
@@ -450,6 +435,87 @@ cmd_view() {
     esac
 }
 
+# Function to view orchestrator logs
+cmd_logs() {
+    local ticket_id=$1
+    local follow=false
+
+    # Check for -f flag
+    if [ "$ticket_id" = "-f" ]; then
+        follow=true
+        ticket_id=$2
+    elif [ "$2" = "-f" ]; then
+        follow=true
+    fi
+
+    if [ -z "$ticket_id" ]; then
+        log_error "Ticket ID required"
+        echo "Usage: ./cc-workflow logs [-f] <ticket-id>"
+        echo ""
+        echo "Options:"
+        echo "  -f    Follow log output (like tail -f)"
+        exit 1
+    fi
+
+    if [ ! -d "$WORKFLOW_DATA_DIR/$ticket_id" ]; then
+        log_error "Workflow for ticket $ticket_id not found"
+        exit 1
+    fi
+
+    local instance_name=$(jq -r '.container_name' "$WORKFLOW_DATA_DIR/$ticket_id/workflow-state.json" 2>/dev/null || echo "workflow-$(echo $ticket_id | tr '[:upper:]' '[:lower:]')")
+    local project_name="claude-$instance_name"
+    local container_name="${project_name}-claude-code-1"
+
+    # Check if container is running
+    if ! docker ps -q -f name="^${container_name}$" 2>/dev/null | grep -q .; then
+        log_error "Container not running for workflow: $ticket_id"
+        echo ""
+        log_info "Start the workflow with: ./cc-workflow start $ticket_id"
+        exit 1
+    fi
+
+    local log_file="/workspace/.workflow-state/$ticket_id/orchestrator.log"
+
+    # Check if log file exists
+    if ! docker exec "$container_name" test -f "$log_file" 2>/dev/null; then
+        log_warning "No logs found yet (orchestrator may still be starting)"
+        echo ""
+        log_info "Waiting for logs..."
+        sleep 2
+
+        if ! docker exec "$container_name" test -f "$log_file" 2>/dev/null; then
+            log_error "Log file not created. Workflow may not be running."
+            exit 1
+        fi
+    fi
+
+    echo ""
+    log_info "Orchestrator logs for: $ticket_id"
+    if [ "$follow" = true ]; then
+        log_info "Following logs (Ctrl+C to stop)..."
+    fi
+    echo "───────────────────────────────────────────────────────────"
+    echo ""
+
+    if [ "$follow" = true ]; then
+        # Follow logs in real-time
+        docker exec "$container_name" tail -f "$log_file" 2>/dev/null || {
+            log_error "Failed to follow logs"
+            exit 1
+        }
+    else
+        # Show last 100 lines
+        docker exec "$container_name" tail -n 100 "$log_file" 2>/dev/null || {
+            log_error "Failed to read logs"
+            exit 1
+        }
+        echo ""
+        echo "───────────────────────────────────────────────────────────"
+        log_info "Showing last 100 lines. Use '-f' to follow logs in real-time"
+        echo ""
+    fi
+}
+
 # Main command dispatcher
 main() {
     local command=$1
@@ -464,6 +530,9 @@ main() {
             ;;
         status)
             cmd_status "$@"
+            ;;
+        logs)
+            cmd_logs "$@"
             ;;
         view)
             cmd_view "$@"
@@ -483,6 +552,8 @@ Usage:
   ./cc-workflow start <linear-ticket-id>    Start new workflow from Linear ticket
   ./cc-workflow resume <ticket-id>          Resume paused workflow
   ./cc-workflow status <ticket-id>          Show workflow status
+  ./cc-workflow logs [-f] <ticket-id>       View orchestrator logs (-f to follow)
+  ./cc-workflow view <ticket-id> [file]     View workflow files
   ./cc-workflow list                        List all workflows
   ./cc-workflow cleanup <ticket-id>         Remove workflow and container
   ./cc-workflow help                        Show this help message
@@ -503,11 +574,14 @@ Status:
   FAILED    - Encountered unrecoverable error
 
 Examples:
-  ./cc-workflow start LIN-123
-  ./cc-workflow status LIN-123
-  ./cc-workflow resume LIN-123
-  ./cc-workflow list
-  ./cc-workflow cleanup LIN-123
+  ./cc-workflow start LIN-123              # Start workflow (runs in background)
+  ./cc-workflow logs LIN-123               # View logs (last 100 lines)
+  ./cc-workflow logs -f LIN-123            # Follow logs in real-time
+  ./cc-workflow status LIN-123             # Check workflow status
+  ./cc-workflow resume LIN-123             # Resume if paused
+  ./cc-workflow view LIN-123 plan          # View generated plan
+  ./cc-workflow list                       # List all workflows
+  ./cc-workflow cleanup LIN-123            # Clean up when done
 
 EOF
             ;;
