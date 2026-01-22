@@ -367,6 +367,45 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 ```
 
+### Install npm packages at container startup
+
+If you need additional npm packages (like `pg` for PostgreSQL) that should be installed when containers start:
+
+**Option 1: Add to Dockerfile (baked into image)**
+```dockerfile
+# Add after the Claude Code/Codex installation section
+RUN npm install -g pg
+```
+
+**Option 2: Add to entrypoint script (installed at startup)**
+
+The entrypoint script (`entrypoint.sh`) automatically installs the `pg` package at startup if a `package.json` exists in the cloned repository. This happens without saving it to `package.json`:
+
+```bash
+# Already included in entrypoint.sh (lines 213-218)
+# Install pg package immediately for PostgreSQL support (foreground)
+echo "Installing pg package..."
+npm install pg --no-save 2>&1 && echo "✓ pg package ready" || echo "⚠ pg package installation failed"
+
+# Install other Node.js dependencies in background
+(npm install 2>&1 && echo "✓ Node.js dependencies installed") &
+```
+
+To add additional packages, edit `entrypoint.sh` and add more `npm install` commands:
+
+```bash
+# Install pg package immediately for PostgreSQL support (foreground)
+echo "Installing pg package..."
+npm install pg --no-save 2>&1 && echo "✓ pg package ready"
+
+# Install other packages in foreground if needed
+npm install other-package --no-save 2>&1 && echo "✓ other-package ready"
+```
+
+**When to use each option:**
+- **Option 1 (Dockerfile)**: Use when packages are needed by all projects and should be pre-installed
+- **Option 2 (Entrypoint)**: Use when packages are project-specific and should be installed only when needed
+
 ## Notes
 
 - Each container has an **isolated workspace** at `/workspace`
