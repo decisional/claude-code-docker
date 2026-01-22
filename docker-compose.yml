@@ -12,6 +12,7 @@ services:
       - LLM_TYPE=${LLM_TYPE:-claude}
       # Git repository configuration (loaded from .env)
       - GIT_REPO_URL=${GIT_REPO_URL}
+      - GIT_BRANCH=${GIT_BRANCH}
       - GIT_CLONE_DIR=${GIT_CLONE_DIR}
       # Set HOME to ensure CLI uses /home/node/.claude or /home/node/.openai
       - HOME=/home/node
