@@ -181,20 +181,18 @@ if [ -n "$GIT_REPO_URL" ]; then
         echo "✓ Repository cloned successfully!"
         cd "$TARGET_DIR"
 
-        # Auto-install Python dependencies if pyproject.toml exists
+        # Auto-install Python dependencies if pyproject.toml exists (in background)
         if [ -f "pyproject.toml" ]; then
             echo ""
-            echo "📦 Found pyproject.toml - installing Python dependencies..."
-            poetry install --no-interaction 2>&1 || echo "⚠ Poetry install had warnings (continuing anyway)"
-            echo "✓ Python dependencies installed via Poetry"
+            echo "📦 Found pyproject.toml - installing Python dependencies in background..."
+            (poetry install --no-interaction 2>&1 && echo "✓ Python dependencies installed via Poetry" || echo "⚠ Poetry install had warnings (continuing anyway)") &
         fi
 
-        # Check for alakazam subdirectory with pyproject.toml (autodex repo)
+        # Check for alakazam subdirectory with pyproject.toml (autodex repo, in background)
         if [ -f "alakazam/pyproject.toml" ]; then
             echo ""
-            echo "📦 Found alakazam/pyproject.toml - installing alakazam dependencies..."
-            (cd alakazam && poetry install --no-interaction 2>&1) || echo "⚠ alakazam Poetry install had warnings (continuing anyway)"
-            echo "✓ alakazam dependencies installed via Poetry"
+            echo "📦 Found alakazam/pyproject.toml - installing alakazam dependencies in background..."
+            (cd alakazam && poetry install --no-interaction 2>&1 && echo "✓ alakazam dependencies installed via Poetry" || echo "⚠ alakazam Poetry install had warnings (continuing anyway)") &
         fi
 
         # Auto-install Go dependencies if go.mod exists
@@ -203,6 +201,19 @@ if [ -n "$GIT_REPO_URL" ]; then
             echo "📦 Found go.mod - installing Go dependencies..."
             go mod download 2>&1 || echo "⚠ go mod download had warnings (continuing anyway)"
             echo "✓ Go dependencies installed"
+        fi
+
+        # Auto-install Node.js dependencies if package.json exists
+        if [ -f "package.json" ]; then
+            echo ""
+            echo "📦 Found package.json - installing Node.js dependencies..."
+
+            # Install pg package immediately for PostgreSQL support (foreground)
+            echo "Installing pg package..."
+            npm install pg --no-save 2>&1 && echo "✓ pg package ready" || echo "⚠ pg package installation failed"
+
+            # Install other Node.js dependencies in background
+            (npm install 2>&1 && echo "✓ Node.js dependencies installed") &
         fi
 
         # Mark initial setup as complete
