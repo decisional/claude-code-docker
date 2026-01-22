@@ -26,9 +26,8 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - CODEX_APPROVAL_POLICY=yolo
     volumes:
-      # Mount .venv volumes for dependency persistence (shared across containers)
-      - autodex-venv:/workspace/autodex/.venv
-      - alakazam-venv:/workspace/autodex/alakazam/.venv
+      # Mount workspace directory for persistence (keeps .venv, repos, etc)
+      - ./workspace:/workspace
       # Mount shared directory (read-only, accessible by all instances)
       - ./shared:/shared:ro
       # Mount Claude credentials with write access (for memories and settings)
@@ -44,7 +43,3 @@ services:
     working_dir: /workspace
     user: "${USER_ID}:${GROUP_ID}"
     command: tail -f /dev/null
-
-volumes:
-  autodex-venv:
-  alakazam-venv:
