@@ -195,12 +195,11 @@ if [ -n "$GIT_REPO_URL" ]; then
             (cd alakazam && poetry install --no-interaction 2>&1 && echo "✓ alakazam dependencies installed via Poetry" || echo "⚠ alakazam Poetry install had warnings (continuing anyway)") &
         fi
 
-        # Auto-install Go dependencies if go.mod exists
+        # Auto-install Go dependencies if go.mod exists (in background)
         if [ -f "go.mod" ]; then
             echo ""
-            echo "📦 Found go.mod - installing Go dependencies..."
-            go mod download 2>&1 || echo "⚠ go mod download had warnings (continuing anyway)"
-            echo "✓ Go dependencies installed"
+            echo "📦 Found go.mod - installing Go dependencies in background..."
+            (go mod download 2>&1 && echo "✓ Go dependencies installed" || echo "⚠ go mod download had warnings (continuing anyway)") &
         fi
 
         # Auto-install Node.js dependencies if package.json exists
