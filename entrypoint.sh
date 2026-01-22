@@ -64,123 +64,27 @@ else
     echo "  To enable PR creation: add GITHUB_TOKEN to .env file"
 fi
 
-# Check if GIT_REPO_URL is set and workspace is empty
+# Clone repo if GIT_REPO_URL is set
 if [ -n "$GIT_REPO_URL" ]; then
-    echo "Git repository configured: $GIT_REPO_URL"
+    TARGET_DIR="/workspace/${GIT_CLONE_DIR:-$(basename "$GIT_REPO_URL" .git)}"
 
-    # Determine target directory
-    if [ -n "$GIT_CLONE_DIR" ]; then
-        TARGET_DIR="/workspace/$GIT_CLONE_DIR"
+    if [ -d "$TARGET_DIR/.git" ]; then
+        echo "✓ Repository exists at $TARGET_DIR"
     else
-        # Extract repo name from URL
-        REPO_NAME=$(basename "$GIT_REPO_URL" .git)
-        TARGET_DIR="/workspace/$REPO_NAME"
+        echo "Cloning $GIT_REPO_URL..."
+        git clone "$GIT_REPO_URL" "$TARGET_DIR" 2>&1 || { echo "❌ Clone failed"; exit 1; }
+        echo "✓ Cloned"
     fi
 
-    # Ensure parent directory exists and is writable
-    mkdir -p "$(dirname "$TARGET_DIR")"
-
-    # Clear any git environment variables that might interfere with cloning
-    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
-    unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES
-
-    echo "Cloning repository to $TARGET_DIR..."
-
-    # Determine clone strategy based on whether branch is specified and exists
-    CLONE_BRANCH_ARG=""
-    CREATE_NEW_BRANCH=false
-
-    if [ -n "$GIT_BRANCH" ]; then
-        # Check if branch exists remotely using git ls-remote
-        if GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$GIT_REPO_URL" "$GIT_BRANCH" 2>/dev/null | grep -q "refs/heads/$GIT_BRANCH"; then
-            echo "✓ Branch '$GIT_BRANCH' exists remotely"
-            CLONE_BRANCH_ARG="--branch $GIT_BRANCH"
-        else
-            echo "ℹ Branch '$GIT_BRANCH' does not exist remotely"
-            echo "  Will create new branch from default branch"
-            CREATE_NEW_BRANCH=true
-        fi
-    fi
-
-    # Clone the repository
-    if GIT_TERMINAL_PROMPT=0 git clone --config core.fsmonitor=false $CLONE_BRANCH_ARG "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
-        cd "$TARGET_DIR"
-
-        # If we need to create a new branch, do it now
-        if [ "$CREATE_NEW_BRANCH" = true ]; then
-            if git checkout -b "$GIT_BRANCH" 2>&1; then
-                echo "✓ Created new branch '$GIT_BRANCH' from default branch"
-            else
-                echo "❌ Failed to create branch '$GIT_BRANCH'"
-                exit 1
-            fi
-        else
-            [ -n "$GIT_BRANCH" ] && echo "✓ Cloned branch: $GIT_BRANCH" || echo "✓ Cloned repository using default branch"
-        fi
-    else
-        CLONE_EXIT=$?
-
-        # Check if directory was created despite error (partial clone)
-        if [ -d "$TARGET_DIR/.git" ]; then
-            echo "⚠ Clone completed but git reported an error (exit code: $CLONE_EXIT)"
-            echo "  Repository appears to be intact, continuing..."
-            cd "$TARGET_DIR"
-
-            # If we still need to create the branch, try now
-            if [ "$CREATE_NEW_BRANCH" = true ]; then
-                if git checkout -b "$GIT_BRANCH" 2>&1; then
-                    echo "✓ Created new branch '$GIT_BRANCH' from default branch"
-                else
-                    echo "❌ Failed to create branch '$GIT_BRANCH'"
-                    exit 1
-                fi
-            fi
-
-            # Fix any git state issues
-            git fsck --full 2>&1 || echo "  (git fsck completed with warnings)"
-        else
-            echo "❌ Failed to clone repository (exit code: $CLONE_EXIT)"
-
-            # Show what's in the workspace for debugging
-            echo "Workspace contents:"
-            ls -la /workspace/ 2>&1 || echo "Cannot list /workspace"
-
-            exit 1
-        fi
-    fi
-
-    echo "✓ Repository cloned successfully!"
     cd "$TARGET_DIR"
 
-    # Install Python dependencies only if .venv is missing (volume may already have it)
-    if [ -f "pyproject.toml" ] && [ ! -d ".venv" ]; then
-        echo ""
-        echo "📦 .venv missing - installing Python dependencies..."
-        poetry install --no-interaction 2>&1 || echo "⚠ Poetry install had warnings (continuing anyway)"
-        echo "✓ Python dependencies installed via Poetry"
-    elif [ -d ".venv" ]; then
-        echo "✓ Using existing .venv (from volume)"
-    fi
-
-    # Check for alakazam subdirectory - install only if .venv missing
-    if [ -f "alakazam/pyproject.toml" ] && [ ! -d "alakazam/.venv" ]; then
-        echo ""
-        echo "📦 alakazam/.venv missing - installing alakazam dependencies..."
-        (cd alakazam && poetry install --no-interaction 2>&1) || echo "⚠ alakazam Poetry install had warnings (continuing anyway)"
-        echo "✓ alakazam dependencies installed via Poetry"
-    elif [ -d "alakazam/.venv" ]; then
-        echo "✓ Using existing alakazam/.venv (from volume)"
-    fi
-
-    # Auto-install Go dependencies if go.mod exists
-    if [ -f "go.mod" ]; then
-        echo ""
-        echo "📦 Found go.mod - installing Go dependencies..."
-        go mod download 2>&1 || echo "⚠ go mod download had warnings (continuing anyway)"
-        echo "✓ Go dependencies installed"
-    fi
+    # Install deps if .venv missing
+    [ -f "pyproject.toml" ] && [ ! -d ".venv" ] && poetry install --no-interaction 2>&1 || true
+    [ -f "alakazam/pyproject.toml" ] && [ ! -d "alakazam/.venv" ] && (cd alakazam && poetry install --no-interaction 2>&1) || true
+    [ -d ".venv" ] && echo "✓ .venv ready"
+    [ -d "alakazam/.venv" ] && echo "✓ alakazam/.venv ready"
 else
-    echo "No git repository configured (GIT_REPO_URL not set)"
+    echo "No GIT_REPO_URL set"
 fi
 
 # Mark initial setup as complete (even if no git repo configured)

@@ -1,117 +1,44 @@
 #!/bin/bash
 # Start a new Claude Code instance or attach to existing one
-# Usage: ./cc-start [instance-name] [--branch branch-name]
-# If no name provided, generates a random name like "happy-tiger"
+# Usage: ./cc-start [instance-name]
 
 set -e
 
-# Parse arguments
-INSTANCE_NAME=""
-GIT_BRANCH_OVERRIDE=""
+INSTANCE_NAME="$1"
 
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --branch)
-            GIT_BRANCH_OVERRIDE="$2"
-            shift 2
-            ;;
-        *)
-            INSTANCE_NAME="$1"
-            shift
-            ;;
-    esac
-done
-
-# Get instance name from argument or generate a random one
+# Generate random name if not provided
 if [ -z "$INSTANCE_NAME" ]; then
-    # Generate a nice random name (adjective-noun combination)
     ADJECTIVES=(happy swift clever bright calm cool bold quick wise gentle noble proud brave kind)
     NOUNS=(tiger lion eagle fox wolf bear hawk deer owl raven falcon dolphin dragon phoenix)
-
-    # Get random indices
-    ADJ_INDEX=$((RANDOM % ${#ADJECTIVES[@]}))
-    NOUN_INDEX=$((RANDOM % ${#NOUNS[@]}))
-
-    INSTANCE_NAME="${ADJECTIVES[$ADJ_INDEX]}-${NOUNS[$NOUN_INDEX]}"
+    INSTANCE_NAME="${ADJECTIVES[$((RANDOM % ${#ADJECTIVES[@]}))]}-${NOUNS[$((RANDOM % ${#NOUNS[@]}))]}"
 fi
 
 PROJECT_NAME="claude-${INSTANCE_NAME}"
 CONTAINER_NAME="${PROJECT_NAME}-claude-code-1"
 
-echo "🚀 Starting Claude Code instance: $INSTANCE_NAME"
-echo "   Project: $PROJECT_NAME"
-echo ""
+echo "🚀 Starting Claude Code: $INSTANCE_NAME"
 
-# Build environment override for branch if specified
-ENV_OVERRIDE=""
-if [ -n "$GIT_BRANCH_OVERRIDE" ]; then
-    ENV_OVERRIDE="-e GIT_BRANCH=$GIT_BRANCH_OVERRIDE"
-    echo "📌 Using branch: $GIT_BRANCH_OVERRIDE"
-    echo ""
-fi
-
-# Check if container already exists and is running
+# Check if container already running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
-    echo "✓ Container already running"
-    
-    # Copy Claude instructions if they exist locally
-    if [ -f "$HOME/.claude/CLAUDE.md" ]; then
-        echo "  Copying Claude instructions..."
-        docker-compose -p "$PROJECT_NAME" exec -T claude-code mkdir -p /home/node/.claude
-        docker cp "$HOME/.claude/CLAUDE.md" "${CONTAINER_NAME}:/home/node/.claude/CLAUDE.md"
-    fi
-    
-    echo "  Connecting to existing instance..."
-    echo ""
+    echo "✓ Container running, connecting..."
+    [ -f "$HOME/.claude/CLAUDE.md" ] && docker cp "$HOME/.claude/CLAUDE.md" "${CONTAINER_NAME}:/home/node/.claude/CLAUDE.md" 2>/dev/null || true
+    docker-compose -p "$PROJECT_NAME" exec -it claude-code /entrypoint.sh claude
+elif docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+    echo "✓ Starting stopped container..."
+    docker-compose -p "$PROJECT_NAME" start
+    [ -f "$HOME/.claude/CLAUDE.md" ] && docker cp "$HOME/.claude/CLAUDE.md" "${CONTAINER_NAME}:/home/node/.claude/CLAUDE.md" 2>/dev/null || true
     docker-compose -p "$PROJECT_NAME" exec -it claude-code /entrypoint.sh claude
 else
-    # Check if container exists but is stopped
-    if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
-        echo "✓ Container exists but stopped"
-        echo "  Starting existing container..."
-        docker-compose -p "$PROJECT_NAME" start
-    else
-        echo "✓ Creating new container..."
-        if [ -n "$ENV_OVERRIDE" ]; then
-            docker-compose -p "$PROJECT_NAME" run -d --name "$CONTAINER_NAME" $ENV_OVERRIDE claude-code tail -f /dev/null
-        else
-            docker-compose -p "$PROJECT_NAME" up -d
-        fi
+    echo "✓ Creating new container..."
+    docker-compose -p "$PROJECT_NAME" up -d
 
-        # Wait for initial repository clone to complete
-        # Dependency installation will continue in background
-        echo ""
-        echo "⏳ Cloning repository..."
-        echo ""
+    echo "⏳ Setting up..."
+    docker logs -f "$CONTAINER_NAME" 2>&1 | while IFS= read -r line; do
+        echo "   $line"
+        echo "$line" | grep -q "✓ Cloned\|Repository exists\|No GIT_REPO_URL" && break
+    done
 
-        # Follow logs until clone is complete
-        docker logs -f "$CONTAINER_NAME" 2>&1 | while IFS= read -r line; do
-            echo "   $line"
-            # Break when clone is complete - let dependencies install in background
-            if echo "$line" | grep -q "Repository cloned successfully!"; then
-                break
-            fi
-            # Also handle case where no git repo is configured
-            if echo "$line" | grep -q "No git repository configured"; then
-                break
-            fi
-        done
-
-        echo ""
-        echo "✓ Repository ready"
-        echo "  (Dependencies are installing in background)"
-    fi
-
+    [ -f "$HOME/.claude/CLAUDE.md" ] && docker cp "$HOME/.claude/CLAUDE.md" "${CONTAINER_NAME}:/home/node/.claude/CLAUDE.md" 2>/dev/null || true
     echo ""
-
-    # Copy Claude instructions if they exist locally
-    if [ -f "$HOME/.claude/CLAUDE.md" ]; then
-        echo "  Copying Claude instructions..."
-        sleep 1  # Wait for container to be fully ready
-        docker cp "$HOME/.claude/CLAUDE.md" "${CONTAINER_NAME}:/home/node/.claude/CLAUDE.md" 2>/dev/null || echo "  (Could not copy instructions, continuing anyway...)"
-    fi
-
-    echo "  Launching Claude Code..."
-    echo ""
-    docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh claude
+    docker-compose -p "$PROJECT_NAME" exec -it claude-code /entrypoint.sh claude
 fi
