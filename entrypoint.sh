@@ -79,28 +79,14 @@ if [ -n "$GIT_REPO_URL" ]; then
 
     # Check if repository already exists
     if [ -d "$TARGET_DIR/.git" ]; then
-        echo "✓ Using existing repository at $TARGET_DIR"
+        # Repository already cloned, check if this is a reconnection or first-time setup
+        SETUP_MARKER="/workspace/.initial-setup-complete"
+        if [ -f "$SETUP_MARKER" ]; then
+            # This is a reconnection to an existing container
+            echo "Using existing repository at $TARGET_DIR"
+        fi
+        # Otherwise, this is the second entrypoint call during initial setup - don't print anything
         cd "$TARGET_DIR"
-
-        # Switch branch if requested and different from current
-        if [ -n "$GIT_BRANCH" ]; then
-            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-            if [ "$CURRENT_BRANCH" != "$GIT_BRANCH" ]; then
-                echo "  Switching to branch: $GIT_BRANCH"
-                git fetch origin "$GIT_BRANCH" 2>/dev/null || true
-                git checkout "$GIT_BRANCH" 2>/dev/null || git checkout -b "$GIT_BRANCH" 2>/dev/null || true
-            fi
-        fi
-
-        # Install dependencies if .venv is missing
-        if [ -f "pyproject.toml" ] && [ ! -d ".venv" ]; then
-            echo "📦 .venv missing - installing Python dependencies..."
-            poetry install --no-interaction 2>&1 || true
-        fi
-        if [ -f "alakazam/pyproject.toml" ] && [ ! -d "alakazam/.venv" ]; then
-            echo "📦 alakazam/.venv missing - installing alakazam dependencies..."
-            (cd alakazam && poetry install --no-interaction 2>&1) || true
-        fi
     else
         # Repository doesn't exist or is not a valid git repo - clone it
 

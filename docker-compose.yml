@@ -26,8 +26,6 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - CODEX_APPROVAL_POLICY=yolo
     volumes:
-      # Mount workspace directory for persistence (keeps .venv, repos, etc)
-      - ./workspace:/workspace
       # Mount shared directory (read-only, accessible by all instances)
       - ./shared:/shared:ro
       # Mount Claude credentials with write access (for memories and settings)
