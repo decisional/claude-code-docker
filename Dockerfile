@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     jq \
     libpq-dev \
+    postgresql-client \
     build-essential \
     zlib1g-dev \
     libncurses5-dev \
