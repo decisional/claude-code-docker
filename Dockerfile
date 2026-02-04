@@ -70,7 +70,7 @@ ENV PATH="/usr/local/go/bin:${PATH}" \
     GOBIN="/home/node/go/bin"
 
 # Install Claude Code CLI globally (pinned to latest stable version)
-RUN npm install -g @anthropic-ai/claude-code@2.1.1
+RUN npm install -g @anthropic-ai/claude-code@2.1.31
 
 # Install OpenAI Codex CLI globally
 RUN npm install -g @openai/codex
