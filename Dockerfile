@@ -69,11 +69,11 @@ ENV PATH="/usr/local/go/bin:${PATH}" \
     GOPATH="/home/node/go" \
     GOBIN="/home/node/go/bin"
 
-# Install Claude Code CLI globally (pinned to latest stable version)
-RUN npm install -g @anthropic-ai/claude-code@2.1.32
+# Install Claude Code CLI globally (always use latest version)
+RUN npm install -g @anthropic-ai/claude-code
 
-# Install OpenAI Codex CLI globally
-RUN npm install -g @openai/codex@0.98.0
+# Install OpenAI Codex CLI globally (always use latest version)
+RUN npm install -g @openai/codex
 
 # Modify the existing node user to match host UID/GID
 # Handle case where GID already exists by using existing group or creating new one
