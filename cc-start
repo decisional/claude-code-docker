@@ -60,7 +60,20 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         docker-compose -p "$PROJECT_NAME" exec -T claude-code mkdir -p /home/node/.claude
         docker cp "$HOME/.claude/CLAUDE.md" "${CONTAINER_NAME}:/home/node/.claude/CLAUDE.md"
     fi
-    
+
+    # Copy skills from repo if they exist
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
+        echo "  Copying skills..."
+        docker cp "$SCRIPT_DIR/.claude/skills" "${CONTAINER_NAME}:/home/node/.claude/skills"
+    fi
+
+    # Copy settings.json from repo if it exists
+    if [ -f "$SCRIPT_DIR/.claude/settings.json" ]; then
+        echo "  Copying settings..."
+        docker cp "$SCRIPT_DIR/.claude/settings.json" "${CONTAINER_NAME}:/home/node/.claude/settings.json"
+    fi
+
     echo "  Connecting to existing instance..."
     echo ""
     docker-compose -p "$PROJECT_NAME" exec -it claude-code /entrypoint.sh claude
@@ -109,6 +122,19 @@ else
         echo "  Copying Claude instructions..."
         sleep 1  # Wait for container to be fully ready
         docker cp "$HOME/.claude/CLAUDE.md" "${CONTAINER_NAME}:/home/node/.claude/CLAUDE.md" 2>/dev/null || echo "  (Could not copy instructions, continuing anyway...)"
+    fi
+
+    # Copy skills from repo if they exist
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
+        echo "  Copying skills..."
+        docker cp "$SCRIPT_DIR/.claude/skills" "${CONTAINER_NAME}:/home/node/.claude/skills" 2>/dev/null || echo "  (Could not copy skills, continuing anyway...)"
+    fi
+
+    # Copy settings.json from repo if it exists
+    if [ -f "$SCRIPT_DIR/.claude/settings.json" ]; then
+        echo "  Copying settings..."
+        docker cp "$SCRIPT_DIR/.claude/settings.json" "${CONTAINER_NAME}:/home/node/.claude/settings.json" 2>/dev/null || echo "  (Could not copy settings, continuing anyway...)"
     fi
 
     echo "  Launching Claude Code..."
