@@ -294,7 +294,7 @@ docker run -it --rm \
 ## Features
 
 - Node.js 20
-- Claude Code CLI (v2.1.1 - pinned for stability and reproducibility)
+- Claude Code CLI (native installer - auto-updates enabled)
 - OpenAI Codex CLI (latest version)
 - Python 3 with pip, venv, Poetry, and common packages (psycopg2-binary, requests)
 - Go 1.23.5
@@ -437,28 +437,26 @@ npm install other-package --no-save 2>&1 && echo "✓ other-package ready"
 
 ### Updating Claude Code to a newer version
 
-The Docker image uses a pinned version of Claude Code for stability. To update to a newer version:
+The Docker image uses the native Claude Code installer which supports auto-updates. To manually update:
 
 ```bash
-# 1. Check the latest version available on npm
-npm view @anthropic-ai/claude-code version
+# 1. Inside a running container
+docker exec -it <container-name> bash
+claude install
 
-# 2. Update the version in Dockerfile (line 23)
-# Change: RUN npm install -g @anthropic-ai/claude-code@2.0.53
-# To:     RUN npm install -g @anthropic-ai/claude-code@<new-version>
-
-# 3. Rebuild the Docker image
+# 2. Or rebuild the Docker image to get the latest version
 ./build.sh
 
-# 4. Restart your containers with the new image
+# 3. Restart your containers with the new image
 ./cc-stop <instance-name>
 ./cc-start <instance-name>
 ```
 
-**Why version pinning?**
-- Ensures consistent behavior across rebuilds
-- Prevents unexpected breaking changes from auto-updates
-- Makes deployments reproducible and debuggable
+**Native installer benefits:**
+- Auto-updates enabled by default
+- Official installation method recommended by Anthropic
+- More stable than npm-based installation
+- No Node.js version conflicts
 
 ### Error: "not a directory" when mounting .gitconfig
 
