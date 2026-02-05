@@ -25,6 +25,8 @@ services:
       # GitHub authentication token (optional, loaded from .env)
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - CODEX_APPROVAL_POLICY=yolo
+      - LOKI_USER=${LOKI_USER}
+      - LOKI_PASSWORD=${LOKI_PASSWORD}
     volumes:
       # Mount shared directory (read-only, accessible by all instances)
       - ./shared:/shared:ro

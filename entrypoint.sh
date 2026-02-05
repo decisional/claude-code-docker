@@ -132,7 +132,7 @@ if [ -n "$GIT_REPO_URL" ]; then
         fi
 
         # Clone the repository
-        if GIT_TERMINAL_PROMPT=0 git clone --config core.fsmonitor=false $CLONE_BRANCH_ARG "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
+        if GIT_TERMINAL_PROMPT=0 git clone --depth 1 --config core.fsmonitor=false $CLONE_BRANCH_ARG "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
             cd "$TARGET_DIR"
 
             # If we need to create a new branch, do it now
