@@ -69,8 +69,11 @@ ENV PATH="/usr/local/go/bin:${PATH}" \
     GOPATH="/home/node/go" \
     GOBIN="/home/node/go/bin"
 
-# Install Claude Code CLI globally (always use latest version)
-RUN npm install -g @anthropic-ai/claude-code
+# Install Claude Code CLI using native installer
+# The installer downloads to ~/.claude/downloads and installs to ~/.local/bin/claude
+USER node
+RUN curl -fsSL https://claude.ai/install.sh | bash
+USER root
 
 # Install OpenAI Codex CLI globally (always use latest version)
 RUN npm install -g @openai/codex
@@ -123,7 +126,7 @@ RUN chmod +x /entrypoint.sh
 ENV CLAUDE_SKIP_PERMISSIONS="" \
     LLM_TYPE="claude" \
     HOME=/home/node \
-    PATH="/opt/venv/bin:/home/node/go/bin:/usr/local/go/bin:${PATH}"
+    PATH="/home/node/.local/bin:/opt/venv/bin:/home/node/go/bin:/usr/local/go/bin:${PATH}"
 
 # Switch to non-root user (use existing 'node' user)
 USER node
