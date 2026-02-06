@@ -84,6 +84,9 @@ if [ -n "$GIT_REPO_URL" ]; then
         if [ -f "$SETUP_MARKER" ]; then
             # This is a reconnection to an existing container
             echo "Using existing repository at $TARGET_DIR"
+            cd "$TARGET_DIR"
+            echo "🔄 Updating repository to latest main..."
+            git fetch origin main && git checkout main && git pull origin main && echo "✓ Updated to latest main" || echo "⚠ Could not update to main (may have local changes)"
         fi
         # Otherwise, this is the second entrypoint call during initial setup - don't print anything
         cd "$TARGET_DIR"
