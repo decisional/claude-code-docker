@@ -138,6 +138,9 @@ if [ -n "$GIT_REPO_URL" ]; then
         if GIT_TERMINAL_PROMPT=0 git clone --depth 1 --config core.fsmonitor=false $CLONE_BRANCH_ARG "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
             cd "$TARGET_DIR"
 
+            # Allow fetching all branches (shallow clone restricts to single branch refspec)
+            git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+
             # If we need to create a new branch, do it now
             if [ "$CREATE_NEW_BRANCH" = true ]; then
                 if git checkout -b "$GIT_BRANCH" 2>&1; then
