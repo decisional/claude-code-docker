@@ -13,8 +13,14 @@ if [ -z "$1" ]; then
 fi
 
 INSTANCE_NAME="$1"
-PROJECT_NAME="codex-${INSTANCE_NAME}"
+CONTAINER_NAME="codex-${INSTANCE_NAME}-claude-code-1"
+
+# Check if container exists and is running
+if ! docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+    echo "❌ No running instance found: $INSTANCE_NAME"
+    exit 1
+fi
 
 echo "🛑 Stopping Codex CLI instance: $INSTANCE_NAME"
-docker-compose -p "$PROJECT_NAME" stop
+docker stop "$CONTAINER_NAME"
 echo "✓ Instance stopped"

@@ -1,52 +1,64 @@
 #!/bin/bash
-# Remove all stopped Codex CLI instances
-# Usage: ./codex-clean
+# Remove all Codex CLI instances (stopped and running)
+# Usage: ./codex-clean [--force]
+# --force: skip confirmation prompt
 
 set -e
 
-echo "🧹 Cleaning stopped Codex CLI instances"
+FORCE=false
+if [ "$1" = "--force" ]; then
+    FORCE=true
+fi
+
+echo "🧹 Cleaning all Codex CLI instances"
 echo "========================================"
 echo ""
 
-# Get all stopped instances
-STOPPED_CONTAINERS=$(docker ps -a --filter "name=codex-" --filter "status=exited" --format "{{.Names}}")
+# Get ALL codex instances (running + stopped)
+ALL_CONTAINERS=$(docker ps -a --filter "name=codex-" --filter "name=-claude-code-1" --format "{{.Names}} {{.Status}}" | grep "^codex-" || true)
 
-# Check if there are any stopped containers
-if [ -z "$STOPPED_CONTAINERS" ]; then
-    echo "✓ No stopped instances found. Nothing to clean."
+# Check if there are any containers
+if [ -z "$ALL_CONTAINERS" ]; then
+    echo "✓ No instances found. Nothing to clean."
     exit 0
 fi
 
-# Count stopped instances
-INSTANCE_COUNT=$(echo "$STOPPED_CONTAINERS" | wc -l | tr -d ' ')
-echo "Found $INSTANCE_COUNT stopped instance(s):"
+# Count instances
+INSTANCE_COUNT=$(echo "$ALL_CONTAINERS" | wc -l | tr -d ' ')
+echo "Found $INSTANCE_COUNT instance(s):"
 echo ""
 
-# List stopped instances
-echo "$STOPPED_CONTAINERS" | sed 's/-claude-code-1//' | sed 's/codex-//' | awk '{print "  ○ " $0}'
-echo ""
-
-# Ask for confirmation
-read -p "Remove all stopped instances? (y/N): " CONFIRM
-if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-    echo "❌ Cancelled"
-    exit 0
-fi
-
-echo ""
-echo "Removing stopped instances..."
-echo ""
-
-# Remove each stopped instance
-while IFS= read -r CONTAINER_NAME; do
-    # Extract instance name from container name
-    # codex-my-project-claude-code-1 -> my-project
+# List instances with status
+while IFS= read -r line; do
+    CONTAINER_NAME=$(echo "$line" | awk '{print $1}')
+    STATUS=$(echo "$line" | cut -d' ' -f2-)
     INSTANCE_NAME=$(echo "$CONTAINER_NAME" | sed 's/^codex-//' | sed 's/-claude-code-1$//')
-    PROJECT_NAME="codex-${INSTANCE_NAME}"
+    echo "  ○ $INSTANCE_NAME ($STATUS)"
+done <<< "$ALL_CONTAINERS"
+echo ""
+
+# Ask for confirmation unless --force
+if [ "$FORCE" = false ]; then
+    read -p "Remove all instances? (y/N): " CONFIRM
+    if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+        echo "❌ Cancelled"
+        exit 0
+    fi
+    echo ""
+fi
+
+echo "Removing instances..."
+echo ""
+
+# Remove each instance
+while IFS= read -r line; do
+    CONTAINER_NAME=$(echo "$line" | awk '{print $1}')
+    INSTANCE_NAME=$(echo "$CONTAINER_NAME" | sed 's/^codex-//' | sed 's/-claude-code-1$//')
 
     echo "  🗑️  Removing: $INSTANCE_NAME"
-    docker-compose -p "$PROJECT_NAME" down 2>/dev/null || echo "     ⚠️  Warning: Could not remove $INSTANCE_NAME"
-done <<< "$STOPPED_CONTAINERS"
+    docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    docker rm "$CONTAINER_NAME" 2>/dev/null || echo "     ⚠️  Warning: Could not remove $INSTANCE_NAME"
+done <<< "$ALL_CONTAINERS"
 
 echo ""
 echo "✓ Cleanup complete!"

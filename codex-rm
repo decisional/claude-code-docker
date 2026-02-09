@@ -13,8 +13,15 @@ if [ -z "$1" ]; then
 fi
 
 INSTANCE_NAME="$1"
-PROJECT_NAME="codex-${INSTANCE_NAME}"
+CONTAINER_NAME="codex-${INSTANCE_NAME}-claude-code-1"
+
+# Check if container exists
+if ! docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+    echo "❌ No instance found: $INSTANCE_NAME"
+    exit 1
+fi
 
 echo "🗑️  Removing Codex CLI instance: $INSTANCE_NAME"
-docker-compose -p "$PROJECT_NAME" down
+docker stop "$CONTAINER_NAME" 2>/dev/null || true
+docker rm "$CONTAINER_NAME"
 echo "✓ Instance removed"
