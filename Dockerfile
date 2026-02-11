@@ -118,6 +118,40 @@ RUN git config --global init.defaultBranch main
 USER root
 RUN chsh -s /bin/zsh node
 
+# Pre-clone repository at build time for faster container startup (optional)
+# If GIT_REPO_URL is provided as a build arg, the repo is cloned during build
+# so the entrypoint only needs to do a git pull instead of a full clone
+ARG GIT_REPO_URL=""
+ARG GIT_CLONE_DIR=""
+COPY .build-temp/.ssh/ /tmp/.build-ssh/
+RUN if [ -n "${GIT_REPO_URL}" ]; then \
+        echo "Pre-cloning repository at build time..." && \
+        mkdir -p /home/node/.ssh && \
+        if ls /tmp/.build-ssh/id_* 1>/dev/null 2>&1; then \
+            cp /tmp/.build-ssh/* /home/node/.ssh/ 2>/dev/null || true && \
+            chmod 700 /home/node/.ssh && \
+            chmod 600 /home/node/.ssh/* 2>/dev/null || true && \
+            chown -R node:node /home/node/.ssh && \
+            su -s /bin/bash node -c "ssh-keyscan github.com bitbucket.org gitlab.com >> /home/node/.ssh/known_hosts 2>/dev/null"; \
+        fi && \
+        if [ -n "${GIT_CLONE_DIR}" ]; then \
+            TARGET_DIR="/workspace/${GIT_CLONE_DIR}"; \
+        else \
+            TARGET_DIR="/workspace/$(basename ${GIT_REPO_URL} .git)"; \
+        fi && \
+        chown node:node /workspace && \
+        if su -s /bin/bash node -c "GIT_TERMINAL_PROMPT=0 git clone --depth 1 --config core.fsmonitor=false '${GIT_REPO_URL}' '${TARGET_DIR}'" 2>&1; then \
+            su -s /bin/bash node -c "cd '${TARGET_DIR}' && git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'" && \
+            touch /workspace/.build-cloned && \
+            chown node:node /workspace/.build-cloned && \
+            echo "Repository pre-cloned successfully"; \
+        else \
+            echo "Build-time clone failed (will clone at container startup instead)"; \
+        fi && \
+        rm -rf /home/node/.ssh; \
+    fi && \
+    rm -rf /tmp/.build-ssh
+
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

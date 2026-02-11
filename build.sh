@@ -80,6 +80,19 @@ if [ -f "$HOME/.codex/auth.json" ]; then
     echo "✅ Codex credentials copied to codex-data"
 fi
 
+# Read GIT_REPO_URL from .env for build-time cloning
+BUILD_GIT_REPO_URL=""
+BUILD_GIT_CLONE_DIR=""
+if [ -f ".env" ]; then
+    BUILD_GIT_REPO_URL=$(grep -E "^GIT_REPO_URL=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+    BUILD_GIT_CLONE_DIR=$(grep -E "^GIT_CLONE_DIR=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+fi
+
+if [ -n "$BUILD_GIT_REPO_URL" ]; then
+    echo "✅ GIT_REPO_URL found in .env - will pre-clone during build for faster startup"
+    echo "   Repo: $BUILD_GIT_REPO_URL"
+fi
+
 # Setup .env file if it doesn't exist
 if [ ! -f ".env" ]; then
     cp .env.example .env
@@ -123,6 +136,7 @@ echo "✅ Claude Code credentials extracted from keychain"
 echo ""
 echo "3. Creating temporary credentials files..."
 mkdir -p ./.build-temp
+mkdir -p ./.build-temp/.ssh
 
 # Claude Code credentials
 echo "$CREDENTIALS" > ./.build-temp/.credentials.json
@@ -152,6 +166,17 @@ else
     echo "   To use Codex CLI, run 'codex' and login, then rebuild"
 fi
 
+# Copy SSH keys to build-temp for build-time git clone (if available)
+if [ -d "$SSH_DIR" ] && ([ -f "$SSH_DIR/id_rsa" ] || [ -f "$SSH_DIR/id_ed25519" ]); then
+    cp "$SSH_DIR"/id_* ./.build-temp/.ssh/ 2>/dev/null || true
+    cp "$SSH_DIR"/known_hosts ./.build-temp/.ssh/ 2>/dev/null || true
+    cp "$SSH_DIR"/config ./.build-temp/.ssh/ 2>/dev/null || true
+    chmod 600 ./.build-temp/.ssh/* 2>/dev/null || true
+    echo "✅ SSH keys copied for build-time git clone"
+else
+    echo "⚠️  No SSH keys found (build-time clone will only work with public repos)"
+fi
+
 # Check if Codex credentials were found (before cleanup)
 CODEX_READY=false
 if [ -f "./.build-temp/.codex/auth.json" ]; then
@@ -161,9 +186,15 @@ fi
 # Build Docker image with credentials
 echo ""
 echo "4. Building Docker image..."
+BUILD_ARGS="--build-arg USER_ID=${CURRENT_UID} --build-arg GROUP_ID=${CURRENT_GID}"
+if [ -n "$BUILD_GIT_REPO_URL" ]; then
+    BUILD_ARGS="$BUILD_ARGS --build-arg GIT_REPO_URL=${BUILD_GIT_REPO_URL}"
+    if [ -n "$BUILD_GIT_CLONE_DIR" ]; then
+        BUILD_ARGS="$BUILD_ARGS --build-arg GIT_CLONE_DIR=${BUILD_GIT_CLONE_DIR}"
+    fi
+fi
 docker build --no-cache \
-    --build-arg USER_ID=${CURRENT_UID} \
-    --build-arg GROUP_ID=${CURRENT_GID} \
+    $BUILD_ARGS \
     -t llm-docker-claude-code:latest .
 
 echo ""
@@ -181,6 +212,12 @@ if [ "$CODEX_READY" = true ]; then
     echo "  - Codex CLI: ✓ Ready"
 else
     echo "  - Codex CLI: ⚠ Not configured (run 'codex' and login, then rebuild)"
+fi
+if [ -n "$BUILD_GIT_REPO_URL" ]; then
+    echo "  - Repository: ✓ Pre-cloned ($BUILD_GIT_REPO_URL)"
+    echo "    Container startup will only need git pull instead of full clone"
+else
+    echo "  - Repository: Will clone at container startup"
 fi
 echo ""
 echo "You can now run:"

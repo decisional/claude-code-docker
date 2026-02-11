@@ -5,6 +5,45 @@
 
 set -e
 
+# Function to install project dependencies (called after clone or pre-clone pull)
+install_dependencies() {
+    local dir="$1"
+
+    # Auto-install Python dependencies if pyproject.toml exists (in background)
+    if [ -f "$dir/pyproject.toml" ]; then
+        echo ""
+        echo "📦 Found pyproject.toml - installing Python dependencies in background..."
+        (cd "$dir" && poetry install --no-interaction 2>&1 && echo "✓ Python dependencies installed via Poetry" || echo "⚠ Poetry install had warnings (continuing anyway)") &
+    fi
+
+    # Check for alakazam subdirectory with pyproject.toml (autodex repo, in background)
+    if [ -f "$dir/alakazam/pyproject.toml" ]; then
+        echo ""
+        echo "📦 Found alakazam/pyproject.toml - installing alakazam dependencies in background..."
+        (cd "$dir/alakazam" && poetry install --no-interaction 2>&1 && echo "✓ alakazam dependencies installed via Poetry" || echo "⚠ alakazam Poetry install had warnings (continuing anyway)") &
+    fi
+
+    # Auto-install Go dependencies if go.mod exists (in background)
+    if [ -f "$dir/go.mod" ]; then
+        echo ""
+        echo "📦 Found go.mod - installing Go dependencies in background..."
+        (cd "$dir" && go mod download 2>&1 && echo "✓ Go dependencies installed" || echo "⚠ go mod download had warnings (continuing anyway)") &
+    fi
+
+    # Auto-install Node.js dependencies if package.json exists
+    if [ -f "$dir/package.json" ]; then
+        echo ""
+        echo "📦 Found package.json - installing Node.js dependencies..."
+
+        # Install pg package immediately for PostgreSQL support (foreground)
+        echo "Installing pg package..."
+        (cd "$dir" && npm install pg --no-save 2>&1 && echo "✓ pg package ready" || echo "⚠ pg package installation failed")
+
+        # Install other Node.js dependencies in background
+        (cd "$dir" && npm install 2>&1 && echo "✓ Node.js dependencies installed") &
+    fi
+}
+
 # Determine which LLM we're using
 LLM_NAME="${LLM_TYPE:-claude}"
 if [ "$LLM_NAME" = "codex" ]; then
@@ -87,6 +126,37 @@ if [ -n "$GIT_REPO_URL" ]; then
             cd "$TARGET_DIR"
             echo "🔄 Updating repository to latest main..."
             git fetch origin main && git checkout main && git pull origin main && echo "✓ Updated to latest main" || echo "⚠ Could not update to main (may have local changes)"
+        elif [ -f "/workspace/.build-cloned" ]; then
+            # Repository was pre-cloned during image build - pull latest and install deps
+            echo "📦 Using pre-cloned repository at $TARGET_DIR"
+            cd "$TARGET_DIR"
+            echo "🔄 Pulling latest changes..."
+            git fetch origin && git pull origin && echo "✓ Updated to latest" || echo "⚠ Could not pull latest (continuing with build-time snapshot)"
+
+            # Handle branch switching if GIT_BRANCH is specified
+            if [ -n "$GIT_BRANCH" ]; then
+                if GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin "$GIT_BRANCH" 2>/dev/null | grep -q "refs/heads/$GIT_BRANCH"; then
+                    echo "Switching to branch '$GIT_BRANCH'..."
+                    git fetch origin "$GIT_BRANCH" && git checkout "$GIT_BRANCH" && git pull origin "$GIT_BRANCH" \
+                        && echo "✓ Switched to branch '$GIT_BRANCH'" \
+                        || echo "⚠ Could not switch to branch '$GIT_BRANCH'"
+                else
+                    echo "Creating new branch '$GIT_BRANCH'..."
+                    git checkout -b "$GIT_BRANCH" \
+                        && echo "✓ Created new branch '$GIT_BRANCH'" \
+                        || echo "⚠ Could not create branch '$GIT_BRANCH'"
+                fi
+            fi
+
+            # Install project dependencies
+            install_dependencies "$TARGET_DIR"
+
+            echo ""
+            echo "✓ Repository ready (pre-cloned)"
+
+            # Mark initial setup as complete
+            touch /workspace/.initial-setup-complete
+            rm -f /workspace/.build-cloned
         fi
         # Otherwise, this is the second entrypoint call during initial setup - don't print anything
         cd "$TARGET_DIR"
@@ -187,39 +257,8 @@ if [ -n "$GIT_REPO_URL" ]; then
         echo "✓ Repository cloned successfully!"
         cd "$TARGET_DIR"
 
-        # Auto-install Python dependencies if pyproject.toml exists (in background)
-        if [ -f "pyproject.toml" ]; then
-            echo ""
-            echo "📦 Found pyproject.toml - installing Python dependencies in background..."
-            (poetry install --no-interaction 2>&1 && echo "✓ Python dependencies installed via Poetry" || echo "⚠ Poetry install had warnings (continuing anyway)") &
-        fi
-
-        # Check for alakazam subdirectory with pyproject.toml (autodex repo, in background)
-        if [ -f "alakazam/pyproject.toml" ]; then
-            echo ""
-            echo "📦 Found alakazam/pyproject.toml - installing alakazam dependencies in background..."
-            (cd alakazam && poetry install --no-interaction 2>&1 && echo "✓ alakazam dependencies installed via Poetry" || echo "⚠ alakazam Poetry install had warnings (continuing anyway)") &
-        fi
-
-        # Auto-install Go dependencies if go.mod exists (in background)
-        if [ -f "go.mod" ]; then
-            echo ""
-            echo "📦 Found go.mod - installing Go dependencies in background..."
-            (go mod download 2>&1 && echo "✓ Go dependencies installed" || echo "⚠ go mod download had warnings (continuing anyway)") &
-        fi
-
-        # Auto-install Node.js dependencies if package.json exists
-        if [ -f "package.json" ]; then
-            echo ""
-            echo "📦 Found package.json - installing Node.js dependencies..."
-
-            # Install pg package immediately for PostgreSQL support (foreground)
-            echo "Installing pg package..."
-            npm install pg --no-save 2>&1 && echo "✓ pg package ready" || echo "⚠ pg package installation failed"
-
-            # Install other Node.js dependencies in background
-            (npm install 2>&1 && echo "✓ Node.js dependencies installed") &
-        fi
+        # Install project dependencies
+        install_dependencies "$TARGET_DIR"
 
         # Mark initial setup as complete
         touch /workspace/.initial-setup-complete
