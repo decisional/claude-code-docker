@@ -131,7 +131,7 @@ if [ -n "$GIT_REPO_URL" ]; then
             echo "📦 Using pre-cloned repository at $TARGET_DIR"
             cd "$TARGET_DIR"
             echo "🔄 Pulling latest changes..."
-            git fetch origin && git pull origin && echo "✓ Updated to latest" || echo "⚠ Could not pull latest (continuing with build-time snapshot)"
+            git fetch origin main && git pull origin main && echo "✓ Updated to latest main" || echo "⚠ Could not pull latest (continuing with build-time snapshot)"
 
             # Handle branch switching if GIT_BRANCH is specified
             if [ -n "$GIT_BRANCH" ]; then
