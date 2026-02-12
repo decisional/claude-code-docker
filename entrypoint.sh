@@ -44,6 +44,44 @@ install_dependencies() {
     fi
 }
 
+# Ensure Codex gets repo-scoped memory by syncing CLAUDE.md into AGENTS.md.
+sync_codex_agents_from_claude() {
+    local target_dir="$1"
+    local source_file="${HOME}/.claude/CLAUDE.md"
+    local target_file="${target_dir}/AGENTS.md"
+    local marker_start="<!-- codex:memory:start -->"
+    local marker_end="<!-- codex:memory:end -->"
+
+    [ -f "$source_file" ] || return 0
+    [ -d "$target_dir" ] || return 0
+
+    if [ ! -f "$target_file" ]; then
+        cp "$source_file" "$target_file"
+        return 0
+    fi
+
+    if grep -q "$marker_start" "$target_file"; then
+        awk -v start="$marker_start" -v end="$marker_end" -v src="$source_file" '
+            $0==start {
+                print
+                while ((getline line < src) > 0) print line
+                close(src)
+                in_block=1
+                next
+            }
+            $0==end { in_block=0 }
+            !in_block { print }
+        ' "$target_file" > "${target_file}.tmp" && mv "${target_file}.tmp" "$target_file"
+        return 0
+    fi
+
+    {
+        printf "\n%s\n" "$marker_start"
+        cat "$source_file"
+        printf "\n%s\n" "$marker_end"
+    } >> "$target_file"
+}
+
 # Determine which LLM we're using
 LLM_NAME="${LLM_TYPE:-claude}"
 if [ "$LLM_NAME" = "codex" ]; then
@@ -269,6 +307,15 @@ fi
 
 # Mark initial setup as complete (even if no git repo configured)
 touch /workspace/.initial-setup-complete 2>/dev/null || true
+
+# Sync memory into AGENTS.md for Codex runs.
+if [ "$LLM_NAME" = "codex" ]; then
+    if [ -n "$TARGET_DIR" ] && [ -d "$TARGET_DIR" ]; then
+        sync_codex_agents_from_claude "$TARGET_DIR"
+    else
+        sync_codex_agents_from_claude "/workspace"
+    fi
+fi
 
 echo ""
 echo "Working directory: $(pwd)"
