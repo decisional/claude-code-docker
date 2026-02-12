@@ -6,6 +6,7 @@ codex-data/
 git-data/
 .claude/
 workflow-data/
+AGENTS.md
 
 # Environment and build files
 .env
