@@ -80,17 +80,24 @@ if [ -f "$HOME/.codex/auth.json" ]; then
     echo "✅ Codex credentials copied to codex-data"
 fi
 
-# Read GIT_REPO_URL from .env for build-time cloning
+# Read GIT_REPO_URL and NPM_INSTALL_DIR from .env for build-time cloning and dep install
 BUILD_GIT_REPO_URL=""
 BUILD_GIT_CLONE_DIR=""
+BUILD_NPM_INSTALL_DIR=""
 if [ -f ".env" ]; then
     BUILD_GIT_REPO_URL=$(grep -E "^GIT_REPO_URL=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'")
     BUILD_GIT_CLONE_DIR=$(grep -E "^GIT_CLONE_DIR=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+    BUILD_NPM_INSTALL_DIR=$(grep -E "^NPM_INSTALL_DIR=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'")
 fi
 
 if [ -n "$BUILD_GIT_REPO_URL" ]; then
     echo "✅ GIT_REPO_URL found in .env - will pre-clone during build for faster startup"
     echo "   Repo: $BUILD_GIT_REPO_URL"
+fi
+
+if [ -n "$BUILD_NPM_INSTALL_DIR" ]; then
+    echo "✅ NPM_INSTALL_DIR found in .env - will run npm install at build time"
+    echo "   Directory: $BUILD_NPM_INSTALL_DIR"
 fi
 
 # Setup .env file if it doesn't exist
@@ -193,6 +200,9 @@ if [ -n "$BUILD_GIT_REPO_URL" ]; then
         BUILD_ARGS="$BUILD_ARGS --build-arg GIT_CLONE_DIR=${BUILD_GIT_CLONE_DIR}"
     fi
 fi
+if [ -n "$BUILD_NPM_INSTALL_DIR" ]; then
+    BUILD_ARGS="$BUILD_ARGS --build-arg NPM_INSTALL_DIR=${BUILD_NPM_INSTALL_DIR}"
+fi
 docker build --no-cache \
     $BUILD_ARGS \
     -t llm-docker-claude-code:latest .
@@ -218,6 +228,9 @@ if [ -n "$BUILD_GIT_REPO_URL" ]; then
     echo "    Container startup will only need git pull instead of full clone"
 else
     echo "  - Repository: Will clone at container startup"
+fi
+if [ -n "$BUILD_NPM_INSTALL_DIR" ]; then
+    echo "  - npm install: ✓ Pre-installed ($BUILD_NPM_INSTALL_DIR)"
 fi
 echo ""
 echo "You can now run:"

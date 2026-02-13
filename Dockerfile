@@ -152,6 +152,25 @@ RUN if [ -n "${GIT_REPO_URL}" ]; then \
     fi && \
     rm -rf /tmp/.build-ssh
 
+# Build-time npm install for faster startup (optional)
+# If NPM_INSTALL_DIR is set, run npm install in that directory within the pre-cloned repo
+# so that node_modules are baked into the image and don't need to be installed at runtime
+ARG NPM_INSTALL_DIR=""
+RUN if [ -n "${NPM_INSTALL_DIR}" ] && [ -n "${GIT_REPO_URL}" ]; then \
+        if [ -n "${GIT_CLONE_DIR}" ]; then \
+            INSTALL_PATH="/workspace/${GIT_CLONE_DIR}/${NPM_INSTALL_DIR}"; \
+        else \
+            INSTALL_PATH="/workspace/$(basename ${GIT_REPO_URL} .git)/${NPM_INSTALL_DIR}"; \
+        fi && \
+        if [ -d "${INSTALL_PATH}" ] && [ -f "${INSTALL_PATH}/package.json" ]; then \
+            echo "Installing npm dependencies in ${INSTALL_PATH}..." && \
+            su -s /bin/bash node -c "cd '${INSTALL_PATH}' && npm install" && \
+            echo "npm dependencies installed successfully in ${NPM_INSTALL_DIR}"; \
+        else \
+            echo "Warning: ${INSTALL_PATH} does not exist or has no package.json (skipping npm install)"; \
+        fi; \
+    fi
+
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

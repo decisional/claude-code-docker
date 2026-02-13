@@ -71,7 +71,7 @@ else
         docker-compose -p "$PROJECT_NAME" start
     else
         echo "✓ Creating new container..."
-        docker-compose -p "$PROJECT_NAME" run -d --name "$CONTAINER_NAME" $ENV_OVERRIDE claude-code tail -f /dev/null
+        docker-compose -p "$PROJECT_NAME" run -d --service-ports --name "$CONTAINER_NAME" $ENV_OVERRIDE claude-code tail -f /dev/null
 
         # Wait for initial repository setup to complete
         # Dependency installation will continue in background
