@@ -47,10 +47,8 @@ services:
       - ./git-data/.ssh:/home/node/.ssh
       # Mount GitHub CLI config (for gh commands)
       - ./git-data/.config/gh:/home/node/.config/gh
-    ports:
-      # Forward dev server port from container to host (e.g., npm run dev)
-      # Configure DEV_PORT in .env (default: 3000)
-      - "${DEV_PORT:-3000}:${DEV_PORT:-3000}"
+    # Ports are not mapped by default to avoid conflicts when running multiple instances.
+    # Use --port flag with cc-start to forward a specific port (e.g., cc-start --port 3000)
     working_dir: /workspace
     user: "${USER_ID}:${GROUP_ID}"
     command: tail -f /dev/null

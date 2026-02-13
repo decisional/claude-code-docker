@@ -1,7 +1,8 @@
 #!/bin/bash
 # Start a new Claude Code instance or attach to existing one
-# Usage: ./cc-start [instance-name] [--branch branch-name]
+# Usage: ./cc-start [instance-name] [--branch branch-name] [--port [port-number]]
 # If no name provided, generates a random name like "happy-tiger"
+# No port forwarding by default. Use --port to expose a dev server port (default: 3000).
 
 set -e
 
@@ -18,12 +19,23 @@ fi
 # Parse arguments
 INSTANCE_NAME=""
 GIT_BRANCH_OVERRIDE=""
+PORT_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --branch)
             GIT_BRANCH_OVERRIDE="$2"
             shift 2
+            ;;
+        --port)
+            # If next arg is a number, use it; otherwise default to 3000
+            if [[ -n "$2" && "$2" =~ ^[0-9]+$ ]]; then
+                PORT_OVERRIDE="$2"
+                shift 2
+            else
+                PORT_OVERRIDE="3000"
+                shift
+            fi
             ;;
         *)
             INSTANCE_NAME="$1"
@@ -50,14 +62,20 @@ CONTAINER_NAME="${PROJECT_NAME}-claude-code-1"
 
 echo "🚀 Starting Claude Code instance: $INSTANCE_NAME"
 echo "   Project: $PROJECT_NAME"
+if [ -n "$PORT_OVERRIDE" ]; then
+    echo "   Dev port: $PORT_OVERRIDE"
+fi
 echo ""
 
-# Build environment override for branch if specified
-ENV_OVERRIDE=""
+# Build extra flags for docker-compose run
+RUN_EXTRA_FLAGS=""
 if [ -n "$GIT_BRANCH_OVERRIDE" ]; then
-    ENV_OVERRIDE="-e GIT_BRANCH=$GIT_BRANCH_OVERRIDE"
+    RUN_EXTRA_FLAGS="$RUN_EXTRA_FLAGS -e GIT_BRANCH=$GIT_BRANCH_OVERRIDE"
     echo "📌 Using branch: $GIT_BRANCH_OVERRIDE"
     echo ""
+fi
+if [ -n "$PORT_OVERRIDE" ]; then
+    RUN_EXTRA_FLAGS="$RUN_EXTRA_FLAGS -e DEV_PORT=$PORT_OVERRIDE --publish $PORT_OVERRIDE:$PORT_OVERRIDE"
 fi
 
 # Check if container already exists and is running
@@ -115,11 +133,7 @@ else
         docker-compose -p "$PROJECT_NAME" start
     else
         echo "✓ Creating new container..."
-        if [ -n "$ENV_OVERRIDE" ]; then
-            docker-compose -p "$PROJECT_NAME" run -d --service-ports --name "$CONTAINER_NAME" $ENV_OVERRIDE claude-code tail -f /dev/null
-        else
-            docker-compose -p "$PROJECT_NAME" up -d
-        fi
+        docker-compose -p "$PROJECT_NAME" run -d --name "$CONTAINER_NAME" $RUN_EXTRA_FLAGS claude-code tail -f /dev/null
 
         # Wait for initial repository setup to complete
         # Dependency installation will continue in background
@@ -193,5 +207,5 @@ else
 
     echo "  Launching Claude Code..."
     echo ""
-    docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh claude
+    docker-compose -p "$PROJECT_NAME" exec -it claude-code /entrypoint.sh claude
 fi
