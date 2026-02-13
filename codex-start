@@ -54,13 +54,14 @@ echo ""
 
 # Build environment override for branch if specified
 ENV_OVERRIDE="-e LLM_TYPE=codex"
+VOLUME_OVERRIDE=""
 if [ -n "$GIT_BRANCH_OVERRIDE" ]; then
     ENV_OVERRIDE="$ENV_OVERRIDE -e GIT_BRANCH=$GIT_BRANCH_OVERRIDE"
     echo "📌 Using branch: $GIT_BRANCH_OVERRIDE"
     echo ""
 fi
 if [ -n "$HOST_MOUNT_DIR" ] && [ -d "$HOST_MOUNT_DIR" ]; then
-    ENV_OVERRIDE="$ENV_OVERRIDE -v ${HOST_MOUNT_DIR}:${HOST_MOUNT_DIR}:ro"
+    VOLUME_OVERRIDE="-v ${HOST_MOUNT_DIR}:${HOST_MOUNT_DIR}:ro"
     echo "📂 Mounting host directory: $HOST_MOUNT_DIR"
     echo ""
 fi
@@ -106,7 +107,7 @@ else
         docker-compose -p "$PROJECT_NAME" start
     else
         echo "✓ Creating new container..."
-        docker-compose -p "$PROJECT_NAME" run -d --service-ports --name "$CONTAINER_NAME" $ENV_OVERRIDE claude-code tail -f /dev/null
+        docker-compose -p "$PROJECT_NAME" run -d --service-ports --name "$CONTAINER_NAME" $ENV_OVERRIDE $VOLUME_OVERRIDE claude-code tail -f /dev/null
 
         # Wait for initial repository setup to complete
         # Dependency installation will continue in background
