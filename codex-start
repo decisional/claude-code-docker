@@ -59,6 +59,11 @@ if [ -n "$GIT_BRANCH_OVERRIDE" ]; then
     echo "📌 Using branch: $GIT_BRANCH_OVERRIDE"
     echo ""
 fi
+if [ -n "$HOST_MOUNT_DIR" ] && [ -d "$HOST_MOUNT_DIR" ]; then
+    ENV_OVERRIDE="$ENV_OVERRIDE -v ${HOST_MOUNT_DIR}:${HOST_MOUNT_DIR}:ro"
+    echo "📂 Mounting host directory: $HOST_MOUNT_DIR"
+    echo ""
+fi
 
 # Check if container already exists and is running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then

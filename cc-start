@@ -77,6 +77,11 @@ fi
 if [ -n "$PORT_OVERRIDE" ]; then
     RUN_EXTRA_FLAGS="$RUN_EXTRA_FLAGS -e DEV_PORT=$PORT_OVERRIDE --publish $PORT_OVERRIDE:$PORT_OVERRIDE"
 fi
+if [ -n "$HOST_MOUNT_DIR" ] && [ -d "$HOST_MOUNT_DIR" ]; then
+    RUN_EXTRA_FLAGS="$RUN_EXTRA_FLAGS -v ${HOST_MOUNT_DIR}:${HOST_MOUNT_DIR}:ro"
+    echo "📂 Mounting host directory: $HOST_MOUNT_DIR"
+    echo ""
+fi
 
 # Check if container already exists and is running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then

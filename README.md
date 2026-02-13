@@ -249,6 +249,28 @@ docker-compose down
 
 **Note:** If using `docker-compose run --rm`, you may be asked to authenticate each time since the container is destroyed after exit.
 
+### Mounting a Host Directory (Screenshots, Files, etc.)
+
+You can mount a directory from your host machine into the container at the **same path**, so file paths copied from Finder or macOS work directly inside the container:
+
+```bash
+# .env
+HOST_MOUNT_DIR=/Users/yourname/Desktop
+```
+
+**How it works:**
+- The directory is mounted read-only at the exact same path inside the container
+- When you take a screenshot and it lands on your Desktop, the path you copy from Finder (e.g., `/Users/yourname/Desktop/Screenshot.png`) works as-is inside the container
+- Claude Code can read the file at that path directly — no path translation needed
+
+**Example workflow:**
+1. Set `HOST_MOUNT_DIR=/Users/yourname/Desktop` in `.env`
+2. Take a screenshot (saved to Desktop)
+3. Start or recreate your container: `./cc-start my-instance`
+4. Paste the file path into Claude Code — it just works
+
+**Note:** The mount is set at container creation time. If you add or change `HOST_MOUNT_DIR` after a container is already created, you'll need to remove and recreate the container (`./cc-rm <name>` then `./cc-start <name>`).
+
 ### Sharing Data Across Instances
 
 All instances have read-only access to a shared directory at `/shared` inside the container:
