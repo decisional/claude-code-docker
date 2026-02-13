@@ -1,8 +1,8 @@
 #!/bin/bash
 # Start a new Claude Code instance or attach to existing one
-# Usage: ./cc-start [instance-name] [--branch branch-name] [--port port-number]
+# Usage: ./cc-start [instance-name] [--branch branch-name] [--port [port-number]]
 # If no name provided, generates a random name like "happy-tiger"
-# No port forwarding by default. Use --port to expose a dev server port.
+# No port forwarding by default. Use --port to expose a dev server port (default: 3000).
 
 set -e
 
@@ -28,8 +28,14 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --port)
-            PORT_OVERRIDE="$2"
-            shift 2
+            # If next arg is a number, use it; otherwise default to 3000
+            if [[ -n "$2" && "$2" =~ ^[0-9]+$ ]]; then
+                PORT_OVERRIDE="$2"
+                shift 2
+            else
+                PORT_OVERRIDE="3000"
+                shift
+            fi
             ;;
         *)
             INSTANCE_NAME="$1"
