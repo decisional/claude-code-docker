@@ -5,6 +5,16 @@
 
 set -e
 
+# Determine script directory early (needed for sourcing .env and finding project files)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source .env to read project configuration (GIT_REPO_URL, NPM_INSTALL_DIR, etc.)
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 # Parse arguments
 INSTANCE_NAME=""
 GIT_BRANCH_OVERRIDE=""
@@ -62,7 +72,6 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     fi
 
     # Copy skills from repo if they exist
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
         echo "  Copying skills..."
         docker cp "$SCRIPT_DIR/.claude/skills" "${CONTAINER_NAME}:/home/node/.claude/skills"
@@ -72,6 +81,27 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     if [ -f "$SCRIPT_DIR/.claude/settings.json" ]; then
         echo "  Copying settings..."
         docker cp "$SCRIPT_DIR/.claude/settings.json" "${CONTAINER_NAME}:/home/node/.claude/settings.json"
+    fi
+
+    # Copy project .env file if it exists
+    ENV_SOURCE="${PROJECT_ENV_FILE:-$SCRIPT_DIR/project.env}"
+    if [ -f "$ENV_SOURCE" ]; then
+        # Determine repo directory inside container
+        if [ -n "$GIT_CLONE_DIR" ]; then
+            REPO_DIR="$GIT_CLONE_DIR"
+        elif [ -n "$GIT_REPO_URL" ]; then
+            REPO_DIR=$(basename "$GIT_REPO_URL" .git)
+        fi
+        if [ -n "$REPO_DIR" ]; then
+            ENV_DEST_DIR="${PROJECT_ENV_DEST:-$NPM_INSTALL_DIR}"
+            if [ -n "$ENV_DEST_DIR" ]; then
+                ENV_DEST="/workspace/$REPO_DIR/$ENV_DEST_DIR/.env"
+            else
+                ENV_DEST="/workspace/$REPO_DIR/.env"
+            fi
+            echo "  Copying project .env to $ENV_DEST..."
+            docker cp "$ENV_SOURCE" "${CONTAINER_NAME}:${ENV_DEST}"
+        fi
     fi
 
     echo "  Connecting to existing instance..."
@@ -129,7 +159,6 @@ else
     fi
 
     # Copy skills from repo if they exist
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
         echo "  Copying skills..."
         docker cp "$SCRIPT_DIR/.claude/skills" "${CONTAINER_NAME}:/home/node/.claude/skills" 2>/dev/null || echo "  (Could not copy skills, continuing anyway...)"
@@ -139,6 +168,27 @@ else
     if [ -f "$SCRIPT_DIR/.claude/settings.json" ]; then
         echo "  Copying settings..."
         docker cp "$SCRIPT_DIR/.claude/settings.json" "${CONTAINER_NAME}:/home/node/.claude/settings.json" 2>/dev/null || echo "  (Could not copy settings, continuing anyway...)"
+    fi
+
+    # Copy project .env file if it exists
+    ENV_SOURCE="${PROJECT_ENV_FILE:-$SCRIPT_DIR/project.env}"
+    if [ -f "$ENV_SOURCE" ]; then
+        # Determine repo directory inside container
+        if [ -n "$GIT_CLONE_DIR" ]; then
+            REPO_DIR="$GIT_CLONE_DIR"
+        elif [ -n "$GIT_REPO_URL" ]; then
+            REPO_DIR=$(basename "$GIT_REPO_URL" .git)
+        fi
+        if [ -n "$REPO_DIR" ]; then
+            ENV_DEST_DIR="${PROJECT_ENV_DEST:-$NPM_INSTALL_DIR}"
+            if [ -n "$ENV_DEST_DIR" ]; then
+                ENV_DEST="/workspace/$REPO_DIR/$ENV_DEST_DIR/.env"
+            else
+                ENV_DEST="/workspace/$REPO_DIR/.env"
+            fi
+            echo "  Copying project .env to $ENV_DEST..."
+            docker cp "$ENV_SOURCE" "${CONTAINER_NAME}:${ENV_DEST}" 2>/dev/null || echo "  (Could not copy project .env, continuing anyway...)"
+        fi
     fi
 
     echo "  Launching Claude Code..."

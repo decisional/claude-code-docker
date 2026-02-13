@@ -10,6 +10,7 @@ AGENTS.md
 
 # Environment and build files
 .env
+project.env
 .build-temp/
 
 # Docker

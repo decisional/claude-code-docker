@@ -5,6 +5,16 @@
 
 set -e
 
+# Determine script directory early (needed for sourcing .env and finding project files)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source .env to read project configuration (GIT_REPO_URL, NPM_INSTALL_DIR, etc.)
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 # Parse arguments
 INSTANCE_NAME=""
 GIT_BRANCH_OVERRIDE=""
@@ -60,6 +70,26 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         docker cp "$HOME/.openai" "${CONTAINER_NAME}:/home/node/.openai" 2>/dev/null || true
     fi
 
+    # Copy project .env file if it exists
+    ENV_SOURCE="${PROJECT_ENV_FILE:-$SCRIPT_DIR/project.env}"
+    if [ -f "$ENV_SOURCE" ]; then
+        if [ -n "$GIT_CLONE_DIR" ]; then
+            REPO_DIR="$GIT_CLONE_DIR"
+        elif [ -n "$GIT_REPO_URL" ]; then
+            REPO_DIR=$(basename "$GIT_REPO_URL" .git)
+        fi
+        if [ -n "$REPO_DIR" ]; then
+            ENV_DEST_DIR="${PROJECT_ENV_DEST:-$NPM_INSTALL_DIR}"
+            if [ -n "$ENV_DEST_DIR" ]; then
+                ENV_DEST="/workspace/$REPO_DIR/$ENV_DEST_DIR/.env"
+            else
+                ENV_DEST="/workspace/$REPO_DIR/.env"
+            fi
+            echo "  Copying project .env to $ENV_DEST..."
+            docker cp "$ENV_SOURCE" "${CONTAINER_NAME}:${ENV_DEST}"
+        fi
+    fi
+
     echo "  Connecting to existing instance..."
     echo ""
     docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh codex
@@ -108,6 +138,26 @@ else
         echo "  Copying OpenAI configuration..."
         sleep 1  # Wait for container to be fully ready
         docker cp "$HOME/.openai" "${CONTAINER_NAME}:/home/node/.openai" 2>/dev/null || echo "  (Could not copy OpenAI config, continuing anyway...)"
+    fi
+
+    # Copy project .env file if it exists
+    ENV_SOURCE="${PROJECT_ENV_FILE:-$SCRIPT_DIR/project.env}"
+    if [ -f "$ENV_SOURCE" ]; then
+        if [ -n "$GIT_CLONE_DIR" ]; then
+            REPO_DIR="$GIT_CLONE_DIR"
+        elif [ -n "$GIT_REPO_URL" ]; then
+            REPO_DIR=$(basename "$GIT_REPO_URL" .git)
+        fi
+        if [ -n "$REPO_DIR" ]; then
+            ENV_DEST_DIR="${PROJECT_ENV_DEST:-$NPM_INSTALL_DIR}"
+            if [ -n "$ENV_DEST_DIR" ]; then
+                ENV_DEST="/workspace/$REPO_DIR/$ENV_DEST_DIR/.env"
+            else
+                ENV_DEST="/workspace/$REPO_DIR/.env"
+            fi
+            echo "  Copying project .env to $ENV_DEST..."
+            docker cp "$ENV_SOURCE" "${CONTAINER_NAME}:${ENV_DEST}" 2>/dev/null || echo "  (Could not copy project .env, continuing anyway...)"
+        fi
     fi
 
     echo "  Launching Codex CLI..."
