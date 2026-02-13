@@ -101,10 +101,9 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         docker cp "$SCRIPT_DIR/.claude/settings.json" "${CONTAINER_NAME}:/home/node/.claude/settings.json"
     fi
 
-    # Copy project .env file if it exists
-    ENV_SOURCE="${PROJECT_ENV_FILE:-$SCRIPT_DIR/project.env}"
-    if [ -f "$ENV_SOURCE" ]; then
-        # Determine repo directory inside container
+    # Copy project .env file if PROJECT_ENV_FILE path is configured in .env
+    if [ -n "$PROJECT_ENV_FILE" ] && [ -f "$PROJECT_ENV_FILE" ]; then
+        # Determine destination inside container
         if [ -n "$GIT_CLONE_DIR" ]; then
             REPO_DIR="$GIT_CLONE_DIR"
         elif [ -n "$GIT_REPO_URL" ]; then
@@ -118,7 +117,8 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
                 ENV_DEST="/workspace/$REPO_DIR/.env"
             fi
             echo "  Copying project .env to $ENV_DEST..."
-            docker cp "$ENV_SOURCE" "${CONTAINER_NAME}:${ENV_DEST}"
+            docker exec "${CONTAINER_NAME}" rm -f "$ENV_DEST" 2>/dev/null || true
+            cat "$PROJECT_ENV_FILE" | docker exec -i "${CONTAINER_NAME}" tee "$ENV_DEST" > /dev/null
         fi
     fi
 
@@ -184,10 +184,8 @@ else
         docker cp "$SCRIPT_DIR/.claude/settings.json" "${CONTAINER_NAME}:/home/node/.claude/settings.json" 2>/dev/null || echo "  (Could not copy settings, continuing anyway...)"
     fi
 
-    # Copy project .env file if it exists
-    ENV_SOURCE="${PROJECT_ENV_FILE:-$SCRIPT_DIR/project.env}"
-    if [ -f "$ENV_SOURCE" ]; then
-        # Determine repo directory inside container
+    # Copy project .env file if PROJECT_ENV_FILE path is configured in .env
+    if [ -n "$PROJECT_ENV_FILE" ] && [ -f "$PROJECT_ENV_FILE" ]; then
         if [ -n "$GIT_CLONE_DIR" ]; then
             REPO_DIR="$GIT_CLONE_DIR"
         elif [ -n "$GIT_REPO_URL" ]; then
@@ -201,7 +199,8 @@ else
                 ENV_DEST="/workspace/$REPO_DIR/.env"
             fi
             echo "  Copying project .env to $ENV_DEST..."
-            docker cp "$ENV_SOURCE" "${CONTAINER_NAME}:${ENV_DEST}" 2>/dev/null || echo "  (Could not copy project .env, continuing anyway...)"
+            docker exec "${CONTAINER_NAME}" rm -f "$ENV_DEST" 2>/dev/null || true
+            cat "$PROJECT_ENV_FILE" | docker exec -i "${CONTAINER_NAME}" tee "$ENV_DEST" > /dev/null
         fi
     fi
 
