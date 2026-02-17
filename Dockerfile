@@ -47,7 +47,7 @@ RUN pip install --no-cache-dir psycopg2-binary requests browser-use
 # --with-deps installs required system libraries (libglib2.0, libnss3, libatk, etc.)
 # PLAYWRIGHT_BROWSERS_PATH ensures browsers are installed in a shared location accessible to all users
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
-RUN playwright install --with-deps chromium && \
+RUN python3 -m playwright install --with-deps chromium && \
     chmod -R a+rx /opt/playwright-browsers
 
 # Install Poetry for all users
