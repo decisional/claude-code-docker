@@ -27,6 +27,30 @@ RUN apt-get update -o Acquire::Retries=3 && \
     libsqlite3-dev \
     libbz2-dev \
     liblzma-dev \
+    # Chromium/Playwright system dependencies
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0 \
+    libnspr4 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    xvfb \
+    fonts-noto-color-emoji \
+    fonts-freefont-ttf \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python 3.12 from source
@@ -45,11 +69,11 @@ RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --timeout 120 --retries 3 psycopg2-binary requests browser-use playwright
 
-# Install Playwright's Chromium browser and its system dependencies
-# --with-deps installs required system libraries (libglib2.0, libnss3, libatk, etc.)
-# PLAYWRIGHT_BROWSERS_PATH ensures browsers are installed in a shared location accessible to all users
+# Install Playwright's Chromium browser binary
+# System dependencies are installed in the apt-get step above
+# PLAYWRIGHT_BROWSERS_PATH ensures browsers are in a shared location accessible to all users
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
-RUN python3 -m playwright install --with-deps chromium && \
+RUN python3 -m playwright install chromium && \
     chmod -R a+rx /opt/playwright-browsers
 
 # Install Poetry for all users
