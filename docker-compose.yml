@@ -36,10 +36,13 @@ services:
       - ./claude-data:/home/node/.claude
       # Mount Codex credentials with write access (for sessions and settings)
       - ./codex-data:/home/node/.codex
-      # Share Claude skills/commands with Codex (live sync via bind mounts)
-      - ./claude-data/skills:/home/node/.codex/skills
-      - ./claude-data/commands:/home/node/.codex/commands
+      # Share skills/commands with each CLI home
+      - ./claude-data/skills:/home/node/.claude/skills
+      - ./claude-data/commands:/home/node/.claude/commands
+      - ./codex-data/skills:/home/node/.codex/skills
+      - ./codex-data/commands:/home/node/.codex/commands
       # Preserve Codex system skills when shared skills mount overrides the directory
+      - ./claude-data/skills/.system:/home/node/.claude/skills/.system:ro
       - ./codex-data/skills/.system:/home/node/.codex/skills/.system:ro
       # Mount Git config with write access (for git operations and storage)
       - ./git-data/.gitconfig:/home/node/.gitconfig
