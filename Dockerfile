@@ -4,11 +4,9 @@ FROM node:20-slim
 ARG USER_ID=1000
 ARG GROUP_ID=1000
 
-# Install system dependencies including Git, zsh, jq, and GitHub CLI
-RUN apt-get update -o Acquire::Retries=3 && \
-    apt-get install -y --no-install-recommends --fix-missing \
+# Install system dependencies including Git, zsh, jq, GitHub CLI, and Chromium/Playwright libs
+RUN apt-get update && apt-get install -y \
     git \
-    openssh-client \
     curl \
     ca-certificates \
     zsh \
@@ -27,12 +25,7 @@ RUN apt-get update -o Acquire::Retries=3 && \
     libsqlite3-dev \
     libbz2-dev \
     liblzma-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Chromium/Playwright system dependencies separately
-# These are the runtime libraries needed for headless Chromium
-RUN apt-get update -o Acquire::Retries=3 && \
-    apt-get install -y --fix-missing \
+    # Chromium/Playwright runtime dependencies
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
