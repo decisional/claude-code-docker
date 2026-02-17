@@ -4,7 +4,7 @@ FROM node:20-slim
 ARG USER_ID=1000
 ARG GROUP_ID=1000
 
-# Install system dependencies including Git, zsh, jq, and GitHub CLI
+# Install system dependencies including Git, zsh, jq, GitHub CLI, and Chromium/Playwright libs
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -25,6 +25,27 @@ RUN apt-get update && apt-get install -y \
     libsqlite3-dev \
     libbz2-dev \
     liblzma-dev \
+    # Chromium/Playwright runtime dependencies
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0 \
+    libnspr4 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python 3.12 from source
@@ -41,7 +62,14 @@ RUN wget https://www.python.org/ftp/python/3.12.4/Python-3.12.4.tgz && \
 # Create a default virtual environment for pip installs
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir psycopg2-binary requests
+RUN pip install --no-cache-dir --timeout 120 --retries 3 psycopg2-binary requests browser-use playwright
+
+# Install Playwright's Chromium browser binary
+# System dependencies are installed in the apt-get step above
+# PLAYWRIGHT_BROWSERS_PATH ensures browsers are in a shared location accessible to all users
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+RUN python3 -m playwright install chromium && \
+    chmod -R a+rx /opt/playwright-browsers
 
 # Install Poetry for all users
 ENV POETRY_HOME="/opt/poetry"
