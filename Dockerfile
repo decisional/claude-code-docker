@@ -41,7 +41,7 @@ RUN wget https://www.python.org/ftp/python/3.12.4/Python-3.12.4.tgz && \
 # Create a default virtual environment for pip installs
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir psycopg2-binary requests browser-use
+RUN pip install --no-cache-dir --timeout 120 --retries 3 psycopg2-binary requests browser-use
 
 # Install Playwright's Chromium browser and its system dependencies
 # --with-deps installs required system libraries (libglib2.0, libnss3, libatk, etc.)
