@@ -27,7 +27,12 @@ RUN apt-get update -o Acquire::Retries=3 && \
     libsqlite3-dev \
     libbz2-dev \
     liblzma-dev \
-    # Chromium/Playwright system dependencies
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Chromium/Playwright system dependencies separately
+# These are the runtime libraries needed for headless Chromium
+RUN apt-get update -o Acquire::Retries=3 && \
+    apt-get install -y --fix-missing \
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
@@ -48,9 +53,6 @@ RUN apt-get update -o Acquire::Retries=3 && \
     libxfixes3 \
     libxkbcommon0 \
     libxrandr2 \
-    xvfb \
-    fonts-noto-color-emoji \
-    fonts-freefont-ttf \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python 3.12 from source
