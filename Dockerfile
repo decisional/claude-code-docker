@@ -5,7 +5,8 @@ ARG USER_ID=1000
 ARG GROUP_ID=1000
 
 # Install system dependencies including Git, zsh, jq, and GitHub CLI
-RUN apt-get update && apt-get install -y \
+RUN apt-get update -o Acquire::Retries=3 && \
+    apt-get install -y --no-install-recommends --fix-missing \
     git \
     curl \
     ca-certificates \
