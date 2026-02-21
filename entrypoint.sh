@@ -162,8 +162,12 @@ if [ -n "$GIT_REPO_URL" ]; then
             # This is a reconnection to an existing container
             echo "Using existing repository at $TARGET_DIR"
             cd "$TARGET_DIR"
-            echo "🔄 Updating repository to latest main..."
-            git fetch origin main && git checkout main && git pull origin main && echo "✓ Updated to latest main" || echo "⚠ Could not update to main (may have local changes)"
+            if [ "$RESET_TO_MAIN" = "true" ]; then
+                echo "🔄 Resetting to latest main..."
+                git fetch origin main && git checkout main && git pull origin main && echo "✓ Reset to latest main" || echo "⚠ Could not reset to main (may have local changes)"
+            else
+                echo "✓ Preserving current branch: $(git branch --show-current)"
+            fi
         elif [ -f "/workspace/.build-cloned" ]; then
             # Repository was pre-cloned during image build - pull latest and install deps
             echo "📦 Using pre-cloned repository at $TARGET_DIR"

@@ -151,8 +151,11 @@ The easiest way to manage multiple Claude Code instances:
 # Or specify a custom name
 ./cc-start my-project
 
-# Resume/connect to an existing instance
+# Resume/connect to an existing instance (preserves branch state)
 ./cc-exec my-project
+
+# Reset instance to latest main (for starting a new task on same container)
+./cc-reset my-project
 
 # Open a zsh shell in an instance
 ./cc-shell my-project
@@ -181,8 +184,11 @@ Manage Codex CLI instances with the same commands, just use `codex-` prefix:
 # Or specify a custom name
 ./codex-start my-project
 
-# Resume/connect to an existing instance
+# Resume/connect to an existing instance (preserves branch state)
 ./codex-exec my-project
+
+# Reset instance to latest main (for starting a new task on same container)
+./codex-reset my-project
 
 # Open a zsh shell in an instance
 ./codex-shell my-project
@@ -203,6 +209,8 @@ Manage Codex CLI instances with the same commands, just use `codex-` prefix:
 **How it works:**
 - Each instance gets its own isolated container
 - Instances stay alive in the background (won't die on Ctrl+C)
+- `exec` preserves your branch state — reconnect and pick up where you left off
+- `reset` checks out latest main — reuse a container for a new task without creating a new one
 - You can run multiple instances simultaneously for different projects
 - Claude Code and Codex CLI instances are separate - you can run both at the same time
 - Instance names are used as docker-compose project names

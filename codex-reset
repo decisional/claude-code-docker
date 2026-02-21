@@ -1,0 +1,42 @@
+#!/bin/bash
+# Reset an existing Codex CLI instance to latest main branch
+# Usage: ./codex-reset [instance-name]
+# If no name provided, uses current directory name
+#
+# This connects to a running container and resets it to the latest main branch.
+# Use this when you've finished a task (merged PR) and want to start fresh
+# on the same container without creating a new one.
+#
+# For resuming interrupted work (preserving branch state), use ./codex-exec instead.
+
+set -e
+
+# Get instance name from argument or use current directory name
+if [ -n "$1" ]; then
+    INSTANCE_NAME="$1"
+else
+    INSTANCE_NAME=$(basename "$(pwd)")
+fi
+
+PROJECT_NAME="codex-${INSTANCE_NAME}"
+CONTAINER_NAME="${PROJECT_NAME}-claude-code-1"
+
+echo "🔄 Resetting Codex CLI instance to main: $INSTANCE_NAME"
+echo ""
+
+# Check if container exists and is running
+if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+    docker-compose -p "$PROJECT_NAME" exec -e RESET_TO_MAIN=true -e LLM_TYPE=codex -it claude-code /entrypoint.sh codex
+else
+    if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+        echo "❌ Container exists but is not running"
+        echo "   Use './codex-start $INSTANCE_NAME' to start it"
+    else
+        echo "❌ No container found for instance: $INSTANCE_NAME"
+        echo "   Use './codex-start $INSTANCE_NAME' to create it"
+        echo ""
+        echo "Available instances:"
+        docker ps -a --filter "name=codex-" --format "  - {{.Names}}" | sed 's/-claude-code-1//' | sed 's/codex-//'
+    fi
+    exit 1
+fi
