@@ -41,7 +41,7 @@ RUN wget https://www.python.org/ftp/python/3.12.4/Python-3.12.4.tgz && \
 # Create a default virtual environment for pip installs
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir psycopg2-binary requests
+RUN pip install --no-cache-dir psycopg2-binary requests pre-commit
 
 # Install Poetry for all users
 ENV POETRY_HOME="/opt/poetry"

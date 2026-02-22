@@ -30,6 +30,13 @@ install_dependencies() {
         (cd "$dir" && go mod download 2>&1 && echo "✓ Go dependencies installed" || echo "⚠ go mod download had warnings (continuing anyway)") &
     fi
 
+    # Install pre-commit hooks if .pre-commit-config.yaml exists (in background)
+    if [ -f "$dir/.pre-commit-config.yaml" ]; then
+        echo ""
+        echo "📦 Found .pre-commit-config.yaml - installing pre-commit hooks in background..."
+        (cd "$dir" && pre-commit install 2>&1 && echo "✓ Pre-commit hooks installed" || echo "⚠ Pre-commit hook installation failed") &
+    fi
+
     # Auto-install Node.js dependencies if package.json exists
     if [ -f "$dir/package.json" ]; then
         echo ""
