@@ -98,13 +98,13 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
 
     echo "  Connecting to existing instance..."
     echo ""
-    docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh codex
+    docker exec $ENV_OVERRIDE -it "$CONTAINER_NAME" /entrypoint.sh codex
 else
     # Check if container exists but is stopped
     if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         echo "✓ Container exists but stopped"
         echo "  Starting existing container..."
-        docker-compose -p "$PROJECT_NAME" start
+        docker start "$CONTAINER_NAME"
     else
         echo "✓ Creating new container..."
         docker-compose -p "$PROJECT_NAME" run -d --service-ports --name "$CONTAINER_NAME" $ENV_OVERRIDE $VOLUME_OVERRIDE claude-code tail -f /dev/null
@@ -168,5 +168,5 @@ else
 
     echo "  Launching Codex CLI..."
     echo ""
-    docker-compose -p "$PROJECT_NAME" exec $ENV_OVERRIDE -it claude-code /entrypoint.sh codex
+    docker exec $ENV_OVERRIDE -it "$CONTAINER_NAME" /entrypoint.sh codex
 fi
