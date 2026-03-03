@@ -15,8 +15,21 @@ fi
 INSTANCE_NAME="$1"
 PROJECT_NAME="claude-${INSTANCE_NAME}"
 
+CONTAINER_NAME="${PROJECT_NAME}-claude-code-1"
+
 echo "🗑️  Removing Claude Code instance: $INSTANCE_NAME"
-docker-compose -p "$PROJECT_NAME" down
+
+# Remove the container directly (works for containers created via both `run` and `up`)
+if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+    docker rm -f "$CONTAINER_NAME"
+    echo "✓ Container removed: $CONTAINER_NAME"
+else
+    echo "  No container found: $CONTAINER_NAME"
+fi
+
+# Also run docker-compose down in case it was started via `up`
+docker-compose -p "$PROJECT_NAME" down 2>/dev/null || true
+
 NETWORK_NAME="${PROJECT_NAME}_default"
 docker network rm "$NETWORK_NAME" 2>/dev/null && echo "✓ Network removed: $NETWORK_NAME" || true
 echo "✓ Instance removed"
