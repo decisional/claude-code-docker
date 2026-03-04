@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/node/.claude/scripts/claude-notify.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/node/.claude/scripts/claude-notify.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

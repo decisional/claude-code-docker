@@ -76,6 +76,12 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         docker cp "$HOME/.openai" "${CONTAINER_NAME}:/home/node/.openai" 2>/dev/null || true
     fi
 
+    # Copy scripts from repo if they exist
+    if [ -d "$SCRIPT_DIR/.claude/scripts" ]; then
+        echo "  Copying scripts..."
+        docker cp "$SCRIPT_DIR/.claude/scripts" "${CONTAINER_NAME}:/home/node/.claude/scripts"
+    fi
+
     # Copy project .env file if it exists
     ENV_SOURCE="${PROJECT_ENV_FILE:-$SCRIPT_DIR/project.env}"
     if [ -f "$ENV_SOURCE" ]; then
@@ -144,6 +150,12 @@ else
         echo "  Copying OpenAI configuration..."
         sleep 1  # Wait for container to be fully ready
         docker cp "$HOME/.openai" "${CONTAINER_NAME}:/home/node/.openai" 2>/dev/null || echo "  (Could not copy OpenAI config, continuing anyway...)"
+    fi
+
+    # Copy scripts from repo if they exist
+    if [ -d "$SCRIPT_DIR/.claude/scripts" ]; then
+        echo "  Copying scripts..."
+        docker cp "$SCRIPT_DIR/.claude/scripts" "${CONTAINER_NAME}:/home/node/.claude/scripts" 2>/dev/null || echo "  (Could not copy scripts, continuing anyway...)"
     fi
 
     # Copy project .env file if it exists

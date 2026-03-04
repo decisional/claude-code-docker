@@ -106,6 +106,12 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         docker cp "$SCRIPT_DIR/.claude/settings.json" "${CONTAINER_NAME}:/home/node/.claude/settings.json"
     fi
 
+    # Copy scripts from repo if they exist
+    if [ -d "$SCRIPT_DIR/.claude/scripts" ]; then
+        echo "  Copying scripts..."
+        docker cp "$SCRIPT_DIR/.claude/scripts" "${CONTAINER_NAME}:/home/node/.claude/scripts"
+    fi
+
     # Copy project .env file if PROJECT_ENV_FILE path is configured in .env
     if [ -n "$PROJECT_ENV_FILE" ] && [ -f "$PROJECT_ENV_FILE" ]; then
         # Determine destination inside container
@@ -187,6 +193,12 @@ else
     if [ -f "$SCRIPT_DIR/.claude/settings.json" ]; then
         echo "  Copying settings..."
         docker cp "$SCRIPT_DIR/.claude/settings.json" "${CONTAINER_NAME}:/home/node/.claude/settings.json" 2>/dev/null || echo "  (Could not copy settings, continuing anyway...)"
+    fi
+
+    # Copy scripts from repo if they exist
+    if [ -d "$SCRIPT_DIR/.claude/scripts" ]; then
+        echo "  Copying scripts..."
+        docker cp "$SCRIPT_DIR/.claude/scripts" "${CONTAINER_NAME}:/home/node/.claude/scripts" 2>/dev/null || echo "  (Could not copy scripts, continuing anyway...)"
     fi
 
     # Copy project .env file if PROJECT_ENV_FILE path is configured in .env

@@ -19,7 +19,14 @@ echo "🔌 Connecting to Claude Code instance: $INSTANCE_NAME"
 echo ""
 
 # Check if container exists and is running
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+    # Copy scripts from repo if they exist
+    if [ -d "$SCRIPT_DIR/.claude/scripts" ]; then
+        docker cp "$SCRIPT_DIR/.claude/scripts" "${CONTAINER_NAME}:/home/node/.claude/scripts" 2>/dev/null || true
+    fi
+
     RESET_FLAG=""
     read -p "Reset to latest main? (y/N) " -n 1 -r
     echo
