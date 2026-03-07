@@ -154,6 +154,9 @@ The easiest way to manage multiple Claude Code instances:
 # Resume/connect to an existing instance (preserves branch state)
 ./cc-exec my-project
 
+# Reset to latest main and reconnect
+./cc-exec my-project --reset
+
 # Reset instance to latest main (for starting a new task on same container)
 ./cc-reset my-project
 
@@ -171,6 +174,12 @@ The easiest way to manage multiple Claude Code instances:
 
 # Remove all stopped instances
 ./cc-clean
+
+# Show runtime state across Claude + Codex instances
+./llm-status
+
+# Show only sessions likely waiting for your input
+./llm-status --waiting
 ```
 
 #### Codex CLI Instances
@@ -186,6 +195,9 @@ Manage Codex CLI instances with the same commands, just use `codex-` prefix:
 
 # Resume/connect to an existing instance (preserves branch state)
 ./codex-exec my-project
+
+# Reset to latest main and reconnect
+./codex-exec my-project --reset
 
 # Reset instance to latest main (for starting a new task on same container)
 ./codex-reset my-project
@@ -204,16 +216,32 @@ Manage Codex CLI instances with the same commands, just use `codex-` prefix:
 
 # Remove all stopped Codex instances
 ./codex-clean
+
+# Show runtime state across Claude + Codex instances
+./llm-status
+
+# Show only sessions likely waiting for your input
+./llm-status --waiting
 ```
 
 **How it works:**
 - Each instance gets its own isolated container
 - Instances stay alive in the background (won't die on Ctrl+C)
-- `exec` preserves your branch state — reconnect and pick up where you left off
+- `start` creates a tmux session inside the container (Claude or Codex) and attaches to it
+- `exec` re-attaches to that same tmux session (no extra CLI process is spawned)
+- Detach without stopping the session: `Ctrl-b d`
 - `reset` checks out latest main — reuse a container for a new task without creating a new one
 - You can run multiple instances simultaneously for different projects
 - Claude Code and Codex CLI instances are separate - you can run both at the same time
 - Instance names are used as docker-compose project names
+
+**Important:** tmux is required for this flow. If scripts report tmux missing, rebuild and recreate containers:
+
+```bash
+./build.sh
+./cc-rm <name>      # or ./codex-rm <name>
+./cc-start <name>   # or ./codex-start <name>
+```
 
 ### If you used build.sh (Credentials Baked In)
 
@@ -330,6 +358,7 @@ docker run -it --rm \
 - Go 1.23.5
 - Git
 - GitHub CLI (v2.40.0)
+- tmux (for persistent in-container Claude/Codex sessions)
 - Automatic git repository cloning (optional, configured via .env)
 - Configurable Claude runtime flag (`--dangerously-skip-permissions`)
 - Support for OpenAI API key configuration
@@ -337,6 +366,7 @@ docker run -it --rm \
 - Writable Git configuration and SSH keys (git operations persist, can do git clone/push)
 - Isolated workspace per container (enables multi-branch parallel work)
 - Run multiple Claude Code and Codex CLI instances simultaneously
+- Unified session monitor command (`./llm-status`, `./llm-status --waiting`)
 
 ## Customization
 

@@ -47,6 +47,8 @@ fi
 
 PROJECT_NAME="codex-${INSTANCE_NAME}"
 CONTAINER_NAME="${PROJECT_NAME}-claude-code-1"
+TMUX_SESSION_NAME="codex"
+SESSION_LOG_PATH="/home/node/.codex/session-monitors/${CONTAINER_NAME}.log"
 
 echo "🚀 Starting Codex CLI instance: $INSTANCE_NAME"
 echo "   Project: $PROJECT_NAME"
@@ -65,6 +67,29 @@ if [ -n "$HOST_MOUNT_DIR" ] && [ -d "$HOST_MOUNT_DIR" ]; then
     echo "📂 Mounting host directory: $HOST_MOUNT_DIR"
     echo ""
 fi
+
+ensure_tmux_available() {
+    if ! docker exec "$CONTAINER_NAME" sh -lc "command -v tmux >/dev/null 2>&1"; then
+        echo "❌ tmux is not available in this container image."
+        echo "   Rebuild with './build.sh', then recreate this instance."
+        exit 1
+    fi
+}
+
+ensure_codex_tmux_session() {
+    ensure_tmux_available
+    docker exec "$CONTAINER_NAME" sh -lc "mkdir -p /home/node/.codex/session-monitors"
+    if ! docker exec "$CONTAINER_NAME" tmux has-session -t "$TMUX_SESSION_NAME" >/dev/null 2>&1; then
+        docker exec -e LLM_TYPE=codex "$CONTAINER_NAME" sh -lc "tmux new-session -d -s '$TMUX_SESSION_NAME' '/entrypoint.sh codex'"
+    fi
+    docker exec "$CONTAINER_NAME" sh -lc "tmux pipe-pane -o -t '$TMUX_SESSION_NAME' \"cat >> '$SESSION_LOG_PATH'\""
+}
+
+attach_codex_tmux_session() {
+    echo "  Attaching to Codex session (detach: Ctrl-b d)..."
+    echo ""
+    docker exec -it "$CONTAINER_NAME" tmux attach -t "$TMUX_SESSION_NAME"
+}
 
 # Check if container already exists and is running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
@@ -96,9 +121,8 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         fi
     fi
 
-    echo "  Connecting to existing instance..."
-    echo ""
-    docker exec $ENV_OVERRIDE -it "$CONTAINER_NAME" /entrypoint.sh codex
+    ensure_codex_tmux_session
+    attach_codex_tmux_session
 else
     # Check if container exists but is stopped
     if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
@@ -166,7 +190,6 @@ else
         fi
     fi
 
-    echo "  Launching Codex CLI..."
-    echo ""
-    docker exec $ENV_OVERRIDE -it "$CONTAINER_NAME" /entrypoint.sh codex
+    ensure_codex_tmux_session
+    attach_codex_tmux_session
 fi

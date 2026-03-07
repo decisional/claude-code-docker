@@ -1,0 +1,169 @@
+#!/bin/bash
+# Show Claude/Codex session status across containers, including likely waiting-for-input sessions.
+# Usage:
+#   ./llm-status
+#   ./llm-status --waiting
+
+set -euo pipefail
+
+WAIT_THRESHOLD_SECONDS="${LLM_WAIT_THRESHOLD_SECONDS:-45}"
+WAITING_ONLY=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --waiting)
+            WAITING_ONLY=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: ./llm-status [--waiting]"
+            echo ""
+            echo "Options:"
+            echo "  --waiting   Show only sessions likely waiting for user input"
+            echo ""
+            echo "Env:"
+            echo "  LLM_WAIT_THRESHOLD_SECONDS (default: 45)"
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            echo "Usage: ./llm-status [--waiting]"
+            exit 1
+            ;;
+    esac
+done
+
+file_mtime_epoch() {
+    local path="$1"
+    if [ ! -f "$path" ]; then
+        return 1
+    fi
+
+    if stat -f "%m" "$path" >/dev/null 2>&1; then
+        stat -f "%m" "$path"
+    else
+        stat -c "%Y" "$path"
+    fi
+}
+
+containers=$(
+    {
+        docker ps -a --filter "name=claude-" --format "{{.Names}}"
+        docker ps -a --filter "name=codex-" --format "{{.Names}}"
+    } | sort -u
+)
+
+if [ -z "$containers" ]; then
+    echo "No Claude or Codex containers found."
+    exit 0
+fi
+
+now_epoch=$(date +%s)
+printed_count=0
+
+printf "%-7s %-20s %-22s %-10s %s\n" "TYPE" "INSTANCE" "STATE" "IDLE(s)" "CONTAINER"
+
+while IFS= read -r container_name; do
+    [ -z "$container_name" ] && continue
+    case "$container_name" in
+        claude-*) llm_type="claude" ;;
+        codex-*) llm_type="codex" ;;
+        *) continue ;;
+    esac
+
+    instance_name=$(echo "$container_name" | sed 's/-claude-code-1$//' | sed 's/^claude-//' | sed 's/^codex-//')
+    session_name="$llm_type"
+    state=""
+    idle_display="-"
+
+    if [ "$llm_type" = "claude" ]; then
+        log_path="claude-data/session-monitors/${container_name}.log"
+    else
+        log_path="codex-data/session-monitors/${container_name}.log"
+    fi
+
+    is_running=$(docker inspect -f '{{.State.Running}}' "$container_name" 2>/dev/null || echo "false")
+    if [ "$is_running" != "true" ]; then
+        state="stopped"
+    elif ! docker exec "$container_name" sh -lc "command -v tmux >/dev/null 2>&1"; then
+        state="no-tmux"
+    elif ! docker exec "$container_name" tmux has-session -t "$session_name" >/dev/null 2>&1; then
+        state="legacy-no-session"
+    else
+        proc_info=$(docker exec "$container_name" sh -lc "
+llm_type='$llm_type'
+pid=''
+for proc_cmdline in /proc/[0-9]*/cmdline; do
+    cmd=\$(tr '\0' ' ' < \"\$proc_cmdline\" 2>/dev/null || true)
+    case \"\$llm_type:\$cmd\" in
+        claude:claude\ --*|claude:claude\ *)
+            pid=\${proc_cmdline#/proc/}
+            pid=\${pid%/cmdline}
+            break
+            ;;
+        codex:*'/codex/codex --'*|codex:*' /usr/local/bin/codex --'*)
+            pid=\${proc_cmdline#/proc/}
+            pid=\${pid%/cmdline}
+            break
+            ;;
+    esac
+done
+
+if [ -z \"\$pid\" ]; then
+    echo 'pid= state= wchan= children=0'
+    exit 0
+fi
+
+proc_state=\$(awk '{print \$3}' /proc/\$pid/stat 2>/dev/null || echo '?')
+wchan=\$(cat /proc/\$pid/wchan 2>/dev/null || echo '')
+children=0
+for proc_stat in /proc/[0-9]*/stat; do
+    ppid=\$(awk '{print \$4}' \"\$proc_stat\" 2>/dev/null || echo '')
+    if [ \"\$ppid\" = \"\$pid\" ]; then
+        children=\$((children + 1))
+    fi
+done
+
+echo \"pid=\$pid state=\$proc_state wchan=\$wchan children=\$children\"
+" || true)
+
+        pid=$(echo "$proc_info" | sed -n 's/.*pid=\([0-9]*\).*/\1/p')
+        proc_state=$(echo "$proc_info" | sed -n 's/.*state=\([^ ]*\).*/\1/p')
+        wchan=$(echo "$proc_info" | sed -n 's/.*wchan=\([^ ]*\).*/\1/p')
+        children=$(echo "$proc_info" | sed -n 's/.*children=\([0-9]*\).*/\1/p')
+        [ -z "$children" ] && children=0
+
+        idle_seconds=""
+        if log_mtime=$(file_mtime_epoch "$log_path" 2>/dev/null); then
+            idle_seconds=$((now_epoch - log_mtime))
+            idle_display="$idle_seconds"
+        fi
+
+        if [ -z "$pid" ]; then
+            state="starting"
+        elif [ "$children" -gt 0 ]; then
+            state="running"
+        elif [ -n "${idle_seconds:-}" ] && [ "$idle_seconds" -ge "$WAIT_THRESHOLD_SECONDS" ]; then
+            state="waiting-input"
+        elif [ -n "${idle_seconds:-}" ]; then
+            state="running"
+        elif [ "$proc_state" = "S" ] && [ "$wchan" = "do_epoll_wait" ]; then
+            state="waiting-input"
+        else
+            state="running"
+        fi
+    fi
+
+    if [ "$WAITING_ONLY" = true ] && [ "$state" != "waiting-input" ]; then
+        continue
+    fi
+
+    printf "%-7s %-20s %-22s %-10s %s\n" "$llm_type" "$instance_name" "$state" "$idle_display" "$container_name"
+    printed_count=$((printed_count + 1))
+done <<< "$containers"
+
+if [ "$printed_count" -eq 0 ]; then
+    if [ "$WAITING_ONLY" = true ]; then
+        echo "No sessions currently classified as waiting for input."
+    fi
+fi

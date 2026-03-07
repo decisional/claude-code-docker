@@ -11,32 +11,8 @@
 
 set -e
 
-# Get instance name from argument or use current directory name
 if [ -n "$1" ]; then
-    INSTANCE_NAME="$1"
+    exec ./cc-exec "$1" --reset
 else
-    INSTANCE_NAME=$(basename "$(pwd)")
-fi
-
-PROJECT_NAME="claude-${INSTANCE_NAME}"
-CONTAINER_NAME="${PROJECT_NAME}-claude-code-1"
-
-echo "🔄 Resetting Claude Code instance to main: $INSTANCE_NAME"
-echo ""
-
-# Check if container exists and is running
-if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
-    docker-compose -p "$PROJECT_NAME" exec -e RESET_TO_MAIN=true -it claude-code /entrypoint.sh claude
-else
-    if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
-        echo "❌ Container exists but is not running"
-        echo "   Use './cc-start $INSTANCE_NAME' to start it"
-    else
-        echo "❌ No container found for instance: $INSTANCE_NAME"
-        echo "   Use './cc-start $INSTANCE_NAME' to create it"
-        echo ""
-        echo "Available instances:"
-        docker ps -a --filter "name=claude-" --format "  - {{.Names}}" | sed 's/-claude-code-1//' | sed 's/claude-//'
-    fi
-    exit 1
+    exec ./cc-exec --reset
 fi

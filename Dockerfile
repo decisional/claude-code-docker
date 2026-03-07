@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
     zsh \
+    tmux \
     wget \
     jq \
     libpq-dev \
