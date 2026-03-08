@@ -1,0 +1,941 @@
+#!/usr/bin/env python3
+"""Lightweight local dashboard for Claude/Codex container sessions."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import subprocess
+import textwrap
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+CLAUDE_LOG_DIR = SCRIPT_DIR / "claude-data" / "session-monitors"
+CODEX_LOG_DIR = SCRIPT_DIR / "codex-data" / "session-monitors"
+CLAUDE_PROJECTS_DIR = SCRIPT_DIR / "claude-data" / "projects"
+CODEX_SESSIONS_DIR = SCRIPT_DIR / "codex-data" / "sessions"
+
+ANSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+
+@dataclass
+class ParsedSessionFile:
+    path: Path
+    mtime: float
+    cwd: str
+    branch: str
+    timestamp: str
+    text: str
+
+
+class SessionFileCache:
+    def __init__(self) -> None:
+        self._cache: dict[Path, ParsedSessionFile | None] = {}
+
+    def get(self, path: Path, parser: Any) -> ParsedSessionFile | None:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return None
+
+        cached = self._cache.get(path)
+        if cached is not None and cached.mtime == mtime:
+            return cached
+
+        parsed = parser(path)
+        if parsed is not None:
+            parsed.mtime = mtime
+        self._cache[path] = parsed
+        return parsed
+
+
+CLAUDE_CACHE = SessionFileCache()
+CODEX_CACHE = SessionFileCache()
+
+
+def run_cmd(args: list[str], timeout: int = 12) -> tuple[int, str, str]:
+    try:
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        return 1, "", str(exc)
+    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+
+def docker_exec(container: str, shell_script: str, timeout: int = 12) -> tuple[int, str, str]:
+    return run_cmd(["docker", "exec", container, "sh", "-lc", shell_script], timeout=timeout)
+
+
+def safe_text(text: str, limit: int = 220) -> str:
+    normalized = ANSI_RE.sub("", text).replace("\r", "")
+    normalized = " ".join(normalized.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 1] + "…"
+
+
+def derive_instance_name(container_name: str) -> str:
+    name = container_name
+    if name.endswith("-claude-code-1"):
+        name = name[: -len("-claude-code-1")]
+    if name.startswith("claude-"):
+        name = name[len("claude-") :]
+    if name.startswith("codex-"):
+        name = name[len("codex-") :]
+    return name
+
+
+def collect_container_names() -> list[str]:
+    names: set[str] = set()
+    for prefix in ("claude-", "codex-"):
+        rc, out, _ = run_cmd(["docker", "ps", "-a", "--filter", f"name={prefix}", "--format", "{{.Names}}"])
+        if rc == 0 and out:
+            for line in out.splitlines():
+                line = line.strip()
+                if line:
+                    names.add(line)
+    return sorted(names)
+
+
+def inspect_running(container: str) -> bool:
+    rc, out, _ = run_cmd(["docker", "inspect", "-f", "{{.State.Running}}", container])
+    return rc == 0 and out.strip() == "true"
+
+
+def inspect_started_at(container: str) -> str:
+    rc, out, _ = run_cmd(["docker", "inspect", "-f", "{{.State.StartedAt}}", container])
+    return out.strip() if rc == 0 else ""
+
+
+def file_mtime_epoch(path: Path) -> int | None:
+    try:
+        return int(path.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def parse_proc_info(proc_info: str) -> dict[str, str]:
+    values = {"pid": "", "state": "", "wchan": "", "children": "0"}
+    for token in proc_info.split():
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        if key in values:
+            values[key] = value
+    return values
+
+
+def get_proc_info(container: str, llm_type: str) -> dict[str, str]:
+    script = textwrap.dedent(
+        fr"""
+        llm_type='{llm_type}'
+        pid=''
+        for proc_cmdline in /proc/[0-9]*/cmdline; do
+            cmd=$(tr '\\0' ' ' < "$proc_cmdline" 2>/dev/null || true)
+            case "$llm_type:$cmd" in
+                claude:*" claude --"*|claude:claude\ --*|claude:*"/claude --"*|claude:*" /home/node/.local/bin/claude --"*)
+                    pid=${{proc_cmdline#/proc/}}
+                    pid=${{pid%/cmdline}}
+                    break
+                    ;;
+                codex:*"/codex/codex --"*|codex:*" /usr/local/bin/codex --"*)
+                    pid=${{proc_cmdline#/proc/}}
+                    pid=${{pid%/cmdline}}
+                    break
+                    ;;
+            esac
+        done
+
+        if [ -z "$pid" ]; then
+            echo 'pid= state= wchan= children=0'
+            exit 0
+        fi
+
+        proc_state=$(awk '{{print $3}}' /proc/$pid/stat 2>/dev/null || echo '?')
+        wchan=$(cat /proc/$pid/wchan 2>/dev/null || echo '')
+        children=0
+        for proc_stat in /proc/[0-9]*/stat; do
+            ppid=$(awk '{{print $4}}' "$proc_stat" 2>/dev/null || echo '')
+            if [ "$ppid" = "$pid" ]; then
+                children=$((children + 1))
+            fi
+        done
+
+        echo "pid=$pid state=$proc_state wchan=$wchan children=$children"
+        """
+    ).strip()
+    rc, out, _ = docker_exec(container, script)
+    if rc != 0:
+        return {"pid": "", "state": "", "wchan": "", "children": "0"}
+    return parse_proc_info(out)
+
+
+def get_repo_and_branch(container: str) -> tuple[str, str]:
+    script = textwrap.dedent(
+        """
+        repo=''
+        if [ -n "$GIT_CLONE_DIR" ] && [ -d "/workspace/$GIT_CLONE_DIR/.git" ]; then
+            repo="/workspace/$GIT_CLONE_DIR"
+        elif [ -n "$GIT_REPO_URL" ]; then
+            repo_name=$(basename "$GIT_REPO_URL" .git)
+            if [ -d "/workspace/$repo_name/.git" ]; then
+                repo="/workspace/$repo_name"
+            fi
+        fi
+
+        if [ -z "$repo" ]; then
+            for d in /workspace/*; do
+                [ -d "$d/.git" ] || continue
+                repo="$d"
+                break
+            done
+        fi
+
+        if [ -n "$repo" ]; then
+            branch=$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+            printf 'repo=%s\n' "$repo"
+            printf 'branch=%s\n' "$branch"
+        fi
+        """
+    ).strip()
+    rc, out, _ = docker_exec(container, script)
+    if rc != 0 or not out:
+        return "", ""
+
+    repo = ""
+    branch = ""
+    for line in out.splitlines():
+        if line.startswith("repo="):
+            repo = line[len("repo=") :].strip()
+        elif line.startswith("branch="):
+            branch = line[len("branch=") :].strip()
+    return repo, branch
+
+
+def get_tmux_pane_preview(container: str, session_name: str) -> list[str]:
+    rc, out, _ = run_cmd(["docker", "exec", container, "tmux", "capture-pane", "-p", "-t", session_name, "-S", "-120"])
+    if rc != 0:
+        return []
+
+    lines = []
+    for raw in out.splitlines():
+        line = safe_text(raw, limit=400)
+        if not line:
+            continue
+        if set(line) == {"─"}:
+            continue
+        lines.append(line)
+
+    return lines[-14:]
+
+
+def read_recent_jsonl_files(base_dir: Path, limit: int = 120) -> list[Path]:
+    if not base_dir.exists():
+        return []
+    files = [p for p in base_dir.rglob("*.jsonl") if p.is_file()]
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return files[:limit]
+
+
+def extract_content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return safe_text(content)
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type in {"text", "input_text"}:
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+            elif item_type == "tool_result":
+                continue
+        if parts:
+            return safe_text(" ".join(parts))
+
+    return ""
+
+
+def parse_claude_session_file(path: Path) -> ParsedSessionFile | None:
+    latest_timestamp = ""
+    latest_text = ""
+    latest_cwd = ""
+    latest_branch = ""
+
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                if obj.get("type") != "user":
+                    continue
+                message = obj.get("message") or {}
+                if message.get("role") != "user":
+                    continue
+
+                text = extract_content_text(message.get("content"))
+                if not text:
+                    continue
+
+                timestamp = str(obj.get("timestamp") or "")
+                cwd = str(obj.get("cwd") or "")
+                branch = str(obj.get("gitBranch") or "")
+                if timestamp >= latest_timestamp:
+                    latest_timestamp = timestamp
+                    latest_text = text
+                    latest_cwd = cwd
+                    latest_branch = branch
+    except OSError:
+        return None
+
+    if not latest_text:
+        return None
+
+    return ParsedSessionFile(path=path, mtime=0.0, cwd=latest_cwd, branch=latest_branch, timestamp=latest_timestamp, text=latest_text)
+
+
+def parse_codex_session_file(path: Path) -> ParsedSessionFile | None:
+    cwd = ""
+    latest_timestamp = ""
+    latest_text = ""
+
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                if obj.get("type") == "session_meta":
+                    payload = obj.get("payload") or {}
+                    if isinstance(payload, dict):
+                        meta_cwd = payload.get("cwd")
+                        if isinstance(meta_cwd, str):
+                            cwd = meta_cwd
+                    continue
+
+                if obj.get("type") != "response_item":
+                    continue
+                payload = obj.get("payload") or {}
+                if not isinstance(payload, dict):
+                    continue
+                if payload.get("type") != "message" or payload.get("role") != "user":
+                    continue
+
+                text = extract_content_text(payload.get("content"))
+                if not text:
+                    continue
+
+                timestamp = str(obj.get("timestamp") or "")
+                if timestamp >= latest_timestamp:
+                    latest_timestamp = timestamp
+                    latest_text = text
+    except OSError:
+        return None
+
+    if not latest_text:
+        return None
+
+    return ParsedSessionFile(path=path, mtime=0.0, cwd=cwd, branch="", timestamp=latest_timestamp, text=latest_text)
+
+
+def find_last_user_message(llm_type: str, repo: str, branch: str, fallback_preview: list[str]) -> str:
+    if llm_type == "claude":
+        candidates = read_recent_jsonl_files(CLAUDE_PROJECTS_DIR, limit=200)
+        best: ParsedSessionFile | None = None
+        for path in candidates:
+            parsed = CLAUDE_CACHE.get(path, parse_claude_session_file)
+            if parsed is None:
+                continue
+            if repo and parsed.cwd and parsed.cwd != repo:
+                continue
+            if branch and parsed.branch and parsed.branch != branch:
+                continue
+            if best is None or parsed.timestamp >= best.timestamp:
+                best = parsed
+        if best is not None:
+            return best.text
+
+    if llm_type == "codex":
+        candidates = read_recent_jsonl_files(CODEX_SESSIONS_DIR, limit=220)
+        best = None
+        for path in candidates:
+            parsed = CODEX_CACHE.get(path, parse_codex_session_file)
+            if parsed is None:
+                continue
+            if repo and parsed.cwd and parsed.cwd != repo:
+                continue
+            if best is None or parsed.timestamp >= best.timestamp:
+                best = parsed
+        if best is not None:
+            return best.text
+
+    for line in reversed(fallback_preview):
+        if line and len(line) > 3 and not line.startswith("• Ran"):
+            return safe_text(line)
+
+    return ""
+
+
+def classify_state(
+    container: str,
+    llm_type: str,
+    running: bool,
+    wait_threshold_seconds: int,
+    now_epoch: int,
+) -> tuple[str, int | None, dict[str, str], bool]:
+    session_name = llm_type
+
+    if llm_type == "claude":
+        log_path = CLAUDE_LOG_DIR / f"{container}.log"
+    else:
+        log_path = CODEX_LOG_DIR / f"{container}.log"
+
+    if not running:
+        return "stopped", None, {"pid": "", "state": "", "wchan": "", "children": "0"}, False
+
+    rc, _, _ = docker_exec(container, "command -v tmux >/dev/null 2>&1")
+    if rc != 0:
+        return "no-tmux", None, {"pid": "", "state": "", "wchan": "", "children": "0"}, False
+
+    rc, _, _ = run_cmd(["docker", "exec", container, "tmux", "has-session", "-t", session_name])
+    if rc != 0:
+        return "legacy-no-session", None, {"pid": "", "state": "", "wchan": "", "children": "0"}, False
+
+    proc = get_proc_info(container, llm_type)
+    pid = proc.get("pid", "")
+    children = int(proc.get("children", "0") or "0")
+    proc_state = proc.get("state", "")
+    wchan = proc.get("wchan", "")
+
+    idle_seconds: int | None = None
+    log_mtime = file_mtime_epoch(log_path)
+    if log_mtime is not None:
+        idle_seconds = max(0, now_epoch - log_mtime)
+
+    if not pid:
+        return "starting", idle_seconds, proc, True
+
+    if children > 0:
+        return "running", idle_seconds, proc, True
+
+    if idle_seconds is not None and idle_seconds >= wait_threshold_seconds:
+        return "waiting-input", idle_seconds, proc, True
+
+    if idle_seconds is not None:
+        return "running", idle_seconds, proc, True
+
+    if proc_state == "S" and wchan == "do_epoll_wait":
+        return "waiting-input", idle_seconds, proc, True
+
+    return "running", idle_seconds, proc, True
+
+
+def collect_status(wait_threshold_seconds: int = 45) -> dict[str, Any]:
+    container_names = collect_container_names()
+    now_epoch = int(dt.datetime.now().timestamp())
+    generated_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    items: list[dict[str, Any]] = []
+
+    for container in container_names:
+        if container.startswith("claude-"):
+            llm_type = "claude"
+        elif container.startswith("codex-"):
+            llm_type = "codex"
+        else:
+            continue
+
+        running = inspect_running(container)
+        state, idle_seconds, proc, tmux_ready = classify_state(
+            container=container,
+            llm_type=llm_type,
+            running=running,
+            wait_threshold_seconds=wait_threshold_seconds,
+            now_epoch=now_epoch,
+        )
+
+        repo_path = ""
+        branch = ""
+        pane_preview: list[str] = []
+        if running:
+            repo_path, branch = get_repo_and_branch(container)
+        if tmux_ready:
+            pane_preview = get_tmux_pane_preview(container, llm_type)
+
+        last_user_message = find_last_user_message(llm_type, repo_path, branch, pane_preview)
+        instance = derive_instance_name(container)
+        reconnect_cmd = f"./cc-exec {instance}" if llm_type == "claude" else f"./codex-exec {instance}"
+        cmd_prefix = "cc" if llm_type == "claude" else "codex"
+
+        item = {
+            "type": llm_type,
+            "instance": derive_instance_name(container),
+            "container": container,
+            "running": running,
+            "state": state,
+            "idle_seconds": idle_seconds,
+            "repo_path": repo_path,
+            "branch": branch,
+            "started_at": inspect_started_at(container),
+            "last_user_message": last_user_message,
+            "pane_preview": pane_preview,
+            "process": proc,
+            "commands": {
+                "reconnect": reconnect_cmd,
+                "reset": reconnect_cmd + " --reset",
+                "shell": f"./{cmd_prefix}-shell {instance}",
+                "stop": f"./{cmd_prefix}-stop {instance}",
+            },
+        }
+        items.append(item)
+
+    waiting_count = sum(1 for item in items if item["state"] == "waiting-input")
+    return {
+        "generated_at": generated_at,
+        "wait_threshold_seconds": wait_threshold_seconds,
+        "waiting_count": waiting_count,
+        "total_count": len(items),
+        "containers": items,
+    }
+
+
+def build_html() -> str:
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LLM Session Dashboard</title>
+  <style>
+    :root {
+      --bg: #f4f7f2;
+      --card: #ffffff;
+      --ink: #17211b;
+      --muted: #5a6a5f;
+      --line: #d8dfd8;
+      --accent: #0f766e;
+      --warn: #b45309;
+      --ok: #166534;
+      --wait: #b91c1c;
+      --pill: #edf4ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: radial-gradient(circle at 10% -15%, #d4eee8 0%, transparent 38%), var(--bg);
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(640px, 1fr) 420px;
+      gap: 16px;
+      padding: 16px;
+      min-height: 100vh;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 6px 20px rgba(26, 35, 28, 0.08);
+    }
+    .header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .table-wrap {
+      overflow: auto;
+      max-height: calc(100vh - 110px);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 13px;
+    }
+    thead th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 600;
+      background: #fbfdfb;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      border-bottom: 1px solid var(--line);
+    }
+    th, td {
+      padding: 10px 10px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    tbody tr { cursor: pointer; }
+    tbody tr:hover { background: #f8fbf9; }
+    tbody tr.selected { background: #edf6f4; }
+    .mono {
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: var(--pill);
+      border: 1px solid var(--line);
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .pill.running { color: var(--ok); border-color: #b7e2c4; background: #ebf9f0; }
+    .pill.waiting-input { color: var(--wait); border-color: #f2b8b5; background: #fdeceb; }
+    .pill.starting { color: #1d4ed8; border-color: #bcd0ff; background: #eef4ff; }
+    .pill.stopped { color: #6b7280; }
+    .pill.no-tmux, .pill.legacy-no-session { color: var(--warn); border-color: #f3d19f; background: #fff7eb; }
+    .detail {
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: calc(100vh - 32px);
+      overflow: auto;
+    }
+    .detail h2 {
+      margin: 0;
+      font-size: 17px;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 6px 10px;
+      font-size: 13px;
+    }
+    .kv .k { color: var(--muted); }
+    .preview {
+      white-space: pre-wrap;
+      background: #f7faf8;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      max-height: 240px;
+      overflow: auto;
+    }
+    .cmds {
+      display: grid;
+      gap: 8px;
+    }
+    .cmd {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 1px solid var(--line);
+      background: #fcfefd;
+      border-radius: 8px;
+      padding: 8px;
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+    }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 5px 8px;
+    }
+    button:hover { border-color: #a8b7ac; }
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    @media (max-width: 1180px) {
+      .layout { grid-template-columns: 1fr; }
+      .table-wrap { max-height: 52vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <section class="card">
+      <div class="header">
+        <div>
+          <div class="title">LLM Session Dashboard</div>
+          <div class="meta" id="metaLine">Loading...</div>
+        </div>
+        <div class="controls">
+          <label><input id="waitingOnly" type="checkbox" /> waiting only</label>
+          <button id="refreshBtn">Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:78px">Type</th>
+              <th style="width:150px">Instance</th>
+              <th style="width:140px">State</th>
+              <th style="width:120px">Branch</th>
+              <th style="width:76px">Idle(s)</th>
+              <th>Last User Message</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <aside class="card">
+      <div class="detail" id="detail">
+        <h2>No Session Selected</h2>
+        <div class="hint">Click a row to inspect branch, last message, pane preview, and reconnect commands.</div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const rowsEl = document.getElementById('rows');
+    const detailEl = document.getElementById('detail');
+    const metaLineEl = document.getElementById('metaLine');
+    const waitingOnlyEl = document.getElementById('waitingOnly');
+    const refreshBtnEl = document.getElementById('refreshBtn');
+
+    let state = { items: [], selected: null, generatedAt: null };
+
+    function esc(text) {
+      return (text || '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+    }
+
+    function pillClass(status) {
+      return `pill ${status || ''}`;
+    }
+
+    function formatIdle(value) {
+      if (value === null || value === undefined) return '-';
+      return String(value);
+    }
+
+    function copyText(value) {
+      navigator.clipboard.writeText(value).catch(() => {});
+    }
+
+    function renderDetail(item) {
+      if (!item) {
+        detailEl.innerHTML = '<h2>No Session Selected</h2><div class="hint">Click a row to inspect branch, last message, pane preview, and reconnect commands.</div>';
+        return;
+      }
+
+      const previewText = (item.pane_preview || []).join('\n');
+      const commandRows = Object.entries(item.commands || {}).map(([name, cmd]) => {
+        return `<div class="cmd"><span>${esc(cmd)}</span><button data-copy="${esc(cmd)}">Copy</button></div>`;
+      }).join('');
+
+      detailEl.innerHTML = `
+        <h2>${esc(item.instance)} <span class="pill ${item.state}">${esc(item.state)}</span></h2>
+        <div class="kv">
+          <div class="k">Type</div><div>${esc(item.type)}</div>
+          <div class="k">Container</div><div class="mono">${esc(item.container)}</div>
+          <div class="k">Branch</div><div class="mono">${esc(item.branch || '-')}</div>
+          <div class="k">Repo</div><div class="mono">${esc(item.repo_path || '-')}</div>
+          <div class="k">Idle</div><div>${esc(formatIdle(item.idle_seconds))}</div>
+          <div class="k">Started</div><div class="mono">${esc(item.started_at || '-')}</div>
+          <div class="k">Last User</div><div>${esc(item.last_user_message || '-')}</div>
+        </div>
+        <div>
+          <div class="k" style="margin-bottom:6px; color: var(--muted); font-size:12px;">Pane Preview</div>
+          <div class="preview">${esc(previewText || '(no pane output)')}</div>
+        </div>
+        <div>
+          <div class="k" style="margin-bottom:6px; color: var(--muted); font-size:12px;">Commands</div>
+          <div class="cmds">${commandRows}</div>
+        </div>
+        <div class="hint">Reconnect commands attach to tmux. Detach with <span class="mono">Ctrl-b d</span>.</div>
+      `;
+
+      detailEl.querySelectorAll('button[data-copy]').forEach(btn => {
+        btn.addEventListener('click', event => {
+          event.stopPropagation();
+          copyText(btn.getAttribute('data-copy') || '');
+        });
+      });
+    }
+
+    function renderRows() {
+      const waitingOnly = waitingOnlyEl.checked;
+      const shown = state.items.filter(item => !waitingOnly || item.state === 'waiting-input');
+
+      rowsEl.innerHTML = shown.map(item => {
+        const selected = state.selected === item.container ? 'selected' : '';
+        return `
+          <tr class="${selected}" data-container="${esc(item.container)}">
+            <td><span class="pill">${esc(item.type)}</span></td>
+            <td class="mono">${esc(item.instance)}</td>
+            <td><span class="${pillClass(item.state)}">${esc(item.state)}</span></td>
+            <td class="mono">${esc(item.branch || '-')}</td>
+            <td>${esc(formatIdle(item.idle_seconds))}</td>
+            <td>${esc(item.last_user_message || '-')}</td>
+          </tr>
+        `;
+      }).join('');
+
+      rowsEl.querySelectorAll('tr').forEach(tr => {
+        tr.addEventListener('click', () => {
+          const container = tr.getAttribute('data-container');
+          state.selected = container;
+          renderRows();
+          renderDetail(state.items.find(item => item.container === container));
+        });
+      });
+
+      if (!shown.length) {
+        rowsEl.innerHTML = '<tr><td colspan="6" class="hint" style="padding: 16px;">No matching sessions.</td></tr>';
+      }
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch('/api/status', { cache: 'no-store' });
+        if (!response.ok) throw new Error('request failed');
+        const data = await response.json();
+        state.items = data.containers || [];
+        state.generatedAt = data.generated_at;
+
+        if (!state.selected && state.items.length) {
+          state.selected = state.items[0].container;
+        }
+
+        const selectedItem = state.items.find(item => item.container === state.selected) || null;
+        metaLineEl.textContent = `Updated ${data.generated_at || '-'} | waiting ${data.waiting_count}/${data.total_count}`;
+        renderRows();
+        renderDetail(selectedItem);
+      } catch (_err) {
+        metaLineEl.textContent = 'Failed to load dashboard data';
+      }
+    }
+
+    waitingOnlyEl.addEventListener('change', renderRows);
+    refreshBtnEl.addEventListener('click', refresh);
+
+    refresh();
+    setInterval(refresh, 8000);
+  </script>
+</body>
+</html>
+"""
+
+
+class DashboardHandler(BaseHTTPRequestHandler):
+    wait_threshold_seconds = 45
+
+    def log_message(self, _fmt: str, *_args: Any) -> None:
+        return
+
+    def _write_json(self, payload: dict[str, Any], status: int = 200) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _write_html(self, body: str, status: int = 200) -> None:
+        data = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self) -> None:
+        if self.path == "/":
+            self._write_html(build_html())
+            return
+
+        if self.path.startswith("/api/status"):
+            payload = collect_status(wait_threshold_seconds=self.wait_threshold_seconds)
+            self._write_json(payload)
+            return
+
+        self._write_html("Not found", status=404)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run a local dashboard for Claude/Codex container sessions")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765)")
+    parser.add_argument(
+        "--wait-threshold-seconds",
+        type=int,
+        default=int(os.environ.get("LLM_WAIT_THRESHOLD_SECONDS", "45")),
+        help="Idle threshold to classify waiting-input (default: 45)",
+    )
+    parser.add_argument("--once", action="store_true", help="Print one JSON snapshot and exit")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+
+    if args.once:
+        payload = collect_status(wait_threshold_seconds=args.wait_threshold_seconds)
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    DashboardHandler.wait_threshold_seconds = args.wait_threshold_seconds
+    server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
+    print(f"Dashboard listening on http://{args.host}:{args.port}")
+    print("Press Ctrl-C to stop")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
