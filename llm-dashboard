@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import textwrap
+import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -57,9 +58,10 @@ class SessionFileCache:
 
 CLAUDE_CACHE = SessionFileCache()
 CODEX_CACHE = SessionFileCache()
+DEEP_MESSAGE_SCAN = os.environ.get("LLM_DASHBOARD_DEEP_MESSAGE_SCAN", "0") == "1"
 
 
-def run_cmd(args: list[str], timeout: int = 12) -> tuple[int, str, str]:
+def run_cmd(args: list[str], timeout: int = 4) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
     except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
@@ -67,7 +69,7 @@ def run_cmd(args: list[str], timeout: int = 12) -> tuple[int, str, str]:
     return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
 
 
-def docker_exec(container: str, shell_script: str, timeout: int = 12) -> tuple[int, str, str]:
+def docker_exec(container: str, shell_script: str, timeout: int = 4) -> tuple[int, str, str]:
     return run_cmd(["docker", "exec", container, "sh", "-lc", shell_script], timeout=timeout)
 
 
@@ -358,8 +360,15 @@ def parse_codex_session_file(path: Path) -> ParsedSessionFile | None:
 
 
 def find_last_user_message(llm_type: str, repo: str, branch: str, fallback_preview: list[str]) -> str:
+    if not DEEP_MESSAGE_SCAN:
+        for line in reversed(fallback_preview):
+            line = line.strip()
+            if line and len(line) > 3 and not line.startswith("• Ran"):
+                return safe_text(line)
+        return ""
+
     if llm_type == "claude":
-        candidates = read_recent_jsonl_files(CLAUDE_PROJECTS_DIR, limit=200)
+        candidates = read_recent_jsonl_files(CLAUDE_PROJECTS_DIR, limit=25)
         best: ParsedSessionFile | None = None
         for path in candidates:
             parsed = CLAUDE_CACHE.get(path, parse_claude_session_file)
@@ -375,7 +384,7 @@ def find_last_user_message(llm_type: str, repo: str, branch: str, fallback_previ
             return best.text
 
     if llm_type == "codex":
-        candidates = read_recent_jsonl_files(CODEX_SESSIONS_DIR, limit=220)
+        candidates = read_recent_jsonl_files(CODEX_SESSIONS_DIR, limit=30)
         best = None
         for path in candidates:
             parsed = CODEX_CACHE.get(path, parse_codex_session_file)
@@ -741,6 +750,7 @@ def build_html() -> str:
     const metaLineEl = document.getElementById('metaLine');
     const waitingOnlyEl = document.getElementById('waitingOnly');
     const refreshBtnEl = document.getElementById('refreshBtn');
+    const FETCH_TIMEOUT_MS = 9000;
 
     let state = { items: [], selected: null, generatedAt: null };
 
@@ -767,7 +777,7 @@ def build_html() -> str:
         return;
       }
 
-      const previewText = (item.pane_preview || []).join('\n');
+      const previewText = (item.pane_preview || []).join('\\n');
       const commandRows = Object.entries(item.commands || {}).map(([name, cmd]) => {
         return `<div class="cmd"><span>${esc(cmd)}</span><button data-copy="${esc(cmd)}">Copy</button></div>`;
       }).join('');
@@ -834,9 +844,15 @@ def build_html() -> str:
       }
     }
 
+    function renderErrorRow(message) {
+      rowsEl.innerHTML = `<tr><td colspan="6" class="hint" style="padding: 16px; color: #b91c1c;">${esc(message)}</td></tr>`;
+    }
+
     async function refresh() {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
       try {
-        const response = await fetch('/api/status', { cache: 'no-store' });
+        const response = await fetch('/api/status', { cache: 'no-store', signal: controller.signal });
         if (!response.ok) throw new Error('request failed');
         const data = await response.json();
         state.items = data.containers || [];
@@ -852,6 +868,9 @@ def build_html() -> str:
         renderDetail(selectedItem);
       } catch (_err) {
         metaLineEl.textContent = 'Failed to load dashboard data';
+        renderErrorRow('Status request failed or timed out. Keep dashboard running and check docker access.');
+      } finally {
+        clearTimeout(timer);
       }
     }
 
@@ -868,6 +887,8 @@ def build_html() -> str:
 
 class DashboardHandler(BaseHTTPRequestHandler):
     wait_threshold_seconds = 45
+    _last_payload: dict[str, Any] | None = None
+    _last_payload_ts: float = 0.0
 
     def log_message(self, _fmt: str, *_args: Any) -> None:
         return
@@ -895,7 +916,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         if self.path.startswith("/api/status"):
-            payload = collect_status(wait_threshold_seconds=self.wait_threshold_seconds)
+            now = time.time()
+            if self._last_payload is not None and (now - self._last_payload_ts) < 4.0:
+                payload = self._last_payload
+            else:
+                payload = collect_status(wait_threshold_seconds=self.wait_threshold_seconds)
+                DashboardHandler._last_payload = payload
+                DashboardHandler._last_payload_ts = now
             self._write_json(payload)
             return
 
