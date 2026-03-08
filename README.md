@@ -181,7 +181,7 @@ The easiest way to manage multiple Claude Code instances:
 # Show only sessions likely waiting for your input
 ./llm-status --waiting
 
-# Open local dashboard (table + click for details/commands)
+# Open local dashboard (status table + chat + live stream)
 ./llm-dashboard
 ```
 
@@ -226,7 +226,7 @@ Manage Codex CLI instances with the same commands, just use `codex-` prefix:
 # Show only sessions likely waiting for your input
 ./llm-status --waiting
 
-# Open local dashboard (table + click for details/commands)
+# Open local dashboard (status table + chat + live stream)
 ./llm-dashboard
 ```
 
@@ -237,7 +237,7 @@ Manage Codex CLI instances with the same commands, just use `codex-` prefix:
 - `exec` re-attaches to that same tmux session (no extra CLI process is spawned)
 - Detach without stopping the session: `Ctrl-b d`
 - `reset` checks out latest main — reuse a container for a new task without creating a new one
-- `llm-dashboard` launches a local web UI so you can sort/filter session state and click rows for branch, last message, pane preview, and reconnect commands
+- `llm-dashboard` launches a local web UI so you can sort/filter session state, open a live pane stream, and send chat messages to selected Claude/Codex sessions
 - You can run multiple instances simultaneously for different projects
 - Claude Code and Codex CLI instances are separate - you can run both at the same time
 - Instance names are used as docker-compose project names
@@ -374,7 +374,7 @@ docker run -it --rm \
 - Isolated workspace per container (enables multi-branch parallel work)
 - Run multiple Claude Code and Codex CLI instances simultaneously
 - Unified session monitor command (`./llm-status`, `./llm-status --waiting`)
-- Local session dashboard (`./llm-dashboard`)
+- Local session dashboard with chat + live stream (`./llm-dashboard`)
 
 ## Customization
 

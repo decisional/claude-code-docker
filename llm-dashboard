@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import os
 import re
+import shlex
 import subprocess
 import textwrap
 import time
@@ -15,6 +16,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 CLAUDE_LOG_DIR = SCRIPT_DIR / "claude-data" / "session-monitors"
@@ -90,6 +92,23 @@ def derive_instance_name(container_name: str) -> str:
     if name.startswith("codex-"):
         name = name[len("codex-") :]
     return name
+
+
+def container_type(container_name: str) -> str:
+    if container_name.startswith("claude-"):
+        return "claude"
+    if container_name.startswith("codex-"):
+        return "codex"
+    return ""
+
+
+def tmux_session_name(container_name: str) -> str:
+    llm_type = container_type(container_name)
+    return llm_type if llm_type else ""
+
+
+def is_valid_container_name(name: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name))
 
 
 def collect_container_names() -> list[str]:
@@ -219,8 +238,9 @@ def get_repo_and_branch(container: str) -> tuple[str, str]:
     return repo, branch
 
 
-def get_tmux_pane_preview(container: str, session_name: str) -> list[str]:
-    rc, out, _ = run_cmd(["docker", "exec", container, "tmux", "capture-pane", "-p", "-t", session_name, "-S", "-120"])
+def get_tmux_pane_lines(container: str, session_name: str, history_lines: int = 220, max_lines: int = 120) -> list[str]:
+    start = f"-{max(20, history_lines)}"
+    rc, out, _ = run_cmd(["docker", "exec", container, "tmux", "capture-pane", "-p", "-t", session_name, "-S", start])
     if rc != 0:
         return []
 
@@ -232,7 +252,13 @@ def get_tmux_pane_preview(container: str, session_name: str) -> list[str]:
         if set(line) == {"─"}:
             continue
         lines.append(line)
+    if max_lines > 0:
+        return lines[-max_lines:]
+    return lines
 
+
+def get_tmux_pane_preview(container: str, session_name: str) -> list[str]:
+    lines = get_tmux_pane_lines(container=container, session_name=session_name, history_lines=140, max_lines=120)
     return lines[-14:]
 
 
@@ -527,6 +553,80 @@ def collect_status(wait_threshold_seconds: int = 45) -> dict[str, Any]:
     }
 
 
+def pane_snapshot(container: str, max_lines: int = 120) -> dict[str, Any]:
+    if not is_valid_container_name(container):
+        return {"ok": False, "error": "invalid container"}
+
+    llm_type = container_type(container)
+    if not llm_type:
+        return {"ok": False, "error": "unsupported container type"}
+
+    session = tmux_session_name(container)
+    if not session:
+        return {"ok": False, "error": "unsupported container type"}
+
+    if not inspect_running(container):
+        return {"ok": False, "error": "container is not running"}
+
+    rc, _, _ = run_cmd(["docker", "exec", container, "tmux", "has-session", "-t", session], timeout=3)
+    if rc != 0:
+        return {"ok": False, "error": "tmux session not found"}
+
+    lines = get_tmux_pane_lines(container=container, session_name=session, history_lines=260, max_lines=max_lines)
+    return {
+        "ok": True,
+        "container": container,
+        "session": session,
+        "timestamp": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "preview_lines": lines,
+    }
+
+
+def send_chat_message(container: str, message: str) -> tuple[bool, str]:
+    if not is_valid_container_name(container):
+        return False, "invalid container"
+
+    llm_type = container_type(container)
+    if not llm_type:
+        return False, "unsupported container type"
+
+    session = tmux_session_name(container)
+    if not inspect_running(container):
+        return False, "container is not running"
+
+    rc, _, _ = run_cmd(["docker", "exec", container, "tmux", "has-session", "-t", session], timeout=3)
+    if rc != 0:
+        return False, "tmux session not found"
+
+    message = message.rstrip("\n")
+    if not message:
+        return False, "message is empty"
+
+    payload_b64 = json.dumps(message).encode("utf-8").hex()
+    shell_script = textwrap.dedent(
+        f"""
+        set -e
+        python3 - <<'PY'
+import json
+import sys
+
+hex_data = {payload_b64!r}
+message = json.loads(bytes.fromhex(hex_data).decode("utf-8"))
+sys.stdout.write(message)
+PY
+        > /tmp/.llm_dashboard_msg.txt
+        tmux load-buffer /tmp/.llm_dashboard_msg.txt
+        tmux paste-buffer -t {shlex.quote(session)}
+        tmux send-keys -t {shlex.quote(session)} Enter
+        rm -f /tmp/.llm_dashboard_msg.txt
+        """
+    ).strip()
+    rc, _out, err = docker_exec(container, shell_script, timeout=6)
+    if rc != 0:
+        return False, err or "failed to send message"
+    return True, ""
+
+
 def build_html() -> str:
     return """<!doctype html>
 <html lang="en">
@@ -695,6 +795,30 @@ def build_html() -> str:
       padding: 5px 8px;
     }
     button:hover { border-color: #a8b7ac; }
+    textarea {
+      width: 100%;
+      min-height: 78px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      background: #ffffff;
+      color: var(--ink);
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .row button {
+      white-space: nowrap;
+    }
+    .status {
+      color: var(--muted);
+      font-size: 12px;
+    }
     .hint {
       color: var(--muted);
       font-size: 12px;
@@ -753,6 +877,8 @@ def build_html() -> str:
     const FETCH_TIMEOUT_MS = 9000;
 
     let state = { items: [], selected: null, generatedAt: null };
+    let paneStream = null;
+    let streamContainer = null;
 
     function esc(text) {
       return (text || '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
@@ -771,8 +897,91 @@ def build_html() -> str:
       navigator.clipboard.writeText(value).catch(() => {});
     }
 
+    function closePaneStream() {
+      if (paneStream) {
+        paneStream.close();
+        paneStream = null;
+      }
+      streamContainer = null;
+    }
+
+    function startPaneStream(container) {
+      if (!container) {
+        closePaneStream();
+        return;
+      }
+      if (paneStream && streamContainer === container) {
+        return;
+      }
+      closePaneStream();
+
+      streamContainer = container;
+      const url = `/api/stream?container=${encodeURIComponent(container)}`;
+      paneStream = new EventSource(url);
+
+      paneStream.onmessage = event => {
+        let payload = null;
+        try {
+          payload = JSON.parse(event.data);
+        } catch (_err) {
+          return;
+        }
+
+        const paneEl = document.getElementById('livePane');
+        const streamMetaEl = document.getElementById('streamMeta');
+        if (!paneEl || !streamMetaEl) return;
+
+        if (!payload.ok) {
+          streamMetaEl.textContent = `stream error: ${payload.error || 'unknown error'}`;
+          return;
+        }
+
+        const lines = payload.preview_lines || [];
+        paneEl.textContent = lines.length ? lines.join('\\n') : '(no pane output)';
+        streamMetaEl.textContent = `live stream: ${payload.timestamp || ''}`;
+      };
+
+      paneStream.onerror = () => {
+        const streamMetaEl = document.getElementById('streamMeta');
+        if (streamMetaEl) {
+          streamMetaEl.textContent = 'stream disconnected';
+        }
+      };
+    }
+
+    async function sendChatMessage(container) {
+      const inputEl = document.getElementById('chatInput');
+      const statusEl = document.getElementById('chatStatus');
+      const sendBtn = document.getElementById('chatSendBtn');
+      if (!inputEl || !statusEl || !sendBtn) return;
+
+      const message = (inputEl.value || '').trim();
+      if (!message) return;
+
+      sendBtn.disabled = true;
+      statusEl.textContent = 'sending...';
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ container, message }),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || 'send failed');
+        }
+        inputEl.value = '';
+        statusEl.textContent = 'sent';
+      } catch (err) {
+        statusEl.textContent = `send failed: ${err.message || 'unknown error'}`;
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
     function renderDetail(item) {
       if (!item) {
+        closePaneStream();
         detailEl.innerHTML = '<h2>No Session Selected</h2><div class="hint">Click a row to inspect branch, last message, pane preview, and reconnect commands.</div>';
         return;
       }
@@ -794,8 +1003,17 @@ def build_html() -> str:
           <div class="k">Last User</div><div>${esc(item.last_user_message || '-')}</div>
         </div>
         <div>
-          <div class="k" style="margin-bottom:6px; color: var(--muted); font-size:12px;">Pane Preview</div>
-          <div class="preview">${esc(previewText || '(no pane output)')}</div>
+          <div class="k" style="margin-bottom:6px; color: var(--muted); font-size:12px;">Live Session Output</div>
+          <div id="streamMeta" class="status" style="margin-bottom:6px;">connecting stream...</div>
+          <div id="livePane" class="preview">${esc(previewText || '(no pane output)')}</div>
+        </div>
+        <div>
+          <div class="k" style="margin-bottom:6px; color: var(--muted); font-size:12px;">Send Message</div>
+          <textarea id="chatInput" placeholder="Type your message to ${esc(item.type)}..."></textarea>
+          <div class="row" style="margin-top:8px; margin-bottom:4px;">
+            <button id="chatSendBtn">Send To Session</button>
+            <div id="chatStatus" class="status">Enter sends to active tmux session.</div>
+          </div>
         </div>
         <div>
           <div class="k" style="margin-bottom:6px; color: var(--muted); font-size:12px;">Commands</div>
@@ -810,6 +1028,20 @@ def build_html() -> str:
           copyText(btn.getAttribute('data-copy') || '');
         });
       });
+
+      const sendBtn = document.getElementById('chatSendBtn');
+      const chatInput = document.getElementById('chatInput');
+      if (sendBtn && chatInput) {
+        sendBtn.addEventListener('click', () => sendChatMessage(item.container));
+        chatInput.addEventListener('keydown', event => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendChatMessage(item.container);
+          }
+        });
+      }
+
+      startPaneStream(item.container);
     }
 
     function renderRows() {
@@ -876,6 +1108,7 @@ def build_html() -> str:
 
     waitingOnlyEl.addEventListener('change', renderRows);
     refreshBtnEl.addEventListener('click', refresh);
+    window.addEventListener('beforeunload', closePaneStream);
 
     refresh();
     setInterval(refresh, 8000);
@@ -910,12 +1143,33 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _write_json_error(self, error: str, status: int = 400) -> None:
+        self._write_json({"ok": False, "error": error}, status=status)
+
+    def _read_json_body(self) -> dict[str, Any] | None:
+        raw_length = self.headers.get("Content-Length", "0")
+        try:
+            length = int(raw_length)
+        except ValueError:
+            return None
+        if length <= 0 or length > 64_000:
+            return None
+        raw = self.rfile.read(length)
+        try:
+            parsed = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
     def do_GET(self) -> None:
-        if self.path == "/":
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path == "/":
             self._write_html(build_html())
             return
 
-        if self.path.startswith("/api/status"):
+        if path == "/api/status":
             now = time.time()
             if self._last_payload is not None and (now - self._last_payload_ts) < 4.0:
                 payload = self._last_payload
@@ -926,7 +1180,73 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._write_json(payload)
             return
 
+        if path == "/api/pane":
+            query = parse_qs(parsed.query)
+            container = (query.get("container", [""])[0] or "").strip()
+            payload = pane_snapshot(container, max_lines=120)
+            status = 200 if payload.get("ok") else 400
+            self._write_json(payload, status=status)
+            return
+
+        if path == "/api/stream":
+            query = parse_qs(parsed.query)
+            container = (query.get("container", [""])[0] or "").strip()
+            if not is_valid_container_name(container):
+                self._write_json_error("invalid container", status=400)
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+
+            try:
+                while True:
+                    payload = pane_snapshot(container, max_lines=120)
+                    chunk = f"data: {json.dumps(payload)}\\n\\n".encode("utf-8")
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                    time.sleep(1.0)
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                pass
+            return
+
         self._write_html("Not found", status=404)
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path != "/api/chat":
+            self._write_json_error("not found", status=404)
+            return
+
+        payload = self._read_json_body()
+        if payload is None:
+            self._write_json_error("invalid JSON body", status=400)
+            return
+
+        container = str(payload.get("container", "")).strip()
+        message = str(payload.get("message", ""))
+
+        if not is_valid_container_name(container):
+            self._write_json_error("invalid container", status=400)
+            return
+        if not message.strip():
+            self._write_json_error("message is empty", status=400)
+            return
+        if len(message) > 12_000:
+            self._write_json_error("message too large (max 12000 chars)", status=400)
+            return
+
+        ok, err = send_chat_message(container=container, message=message)
+        if not ok:
+            self._write_json_error(err or "failed to send message", status=400)
+            return
+
+        self._write_json({"ok": True, "container": container})
 
 
 def parse_args() -> argparse.Namespace:
