@@ -112,6 +112,52 @@ def is_valid_container_name(name: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name))
 
 
+def resolve_tmux_target_pane(container: str, session_name: str) -> str:
+    """Pick the pane most likely running the interactive LLM UI."""
+    rc, out, _ = run_cmd(
+        [
+            "docker",
+            "exec",
+            container,
+            "tmux",
+            "list-panes",
+            "-t",
+            session_name,
+            "-F",
+            "#{pane_id}\t#{pane_active}\t#{pane_current_command}\t#{window_index}\t#{pane_index}\t#{pane_dead}",
+        ],
+        timeout=4,
+    )
+    if rc != 0 or not out:
+        return session_name
+
+    best_target = session_name
+    best_score = -1
+    for raw in out.splitlines():
+        parts = raw.split("\t")
+        if len(parts) != 6:
+            continue
+        pane_id, pane_active, pane_command, window_index, pane_index, pane_dead = parts
+        if pane_dead == "1":
+            continue
+
+        score = 0
+        if pane_command in {"node", "codex", "claude"}:
+            score += 100
+        if pane_active == "1":
+            score += 25
+        if window_index == "0":
+            score += 5
+        if pane_index == "0":
+            score += 3
+
+        if score > best_score:
+            best_score = score
+            best_target = pane_id or session_name
+
+    return best_target
+
+
 def collect_container_names() -> list[str]:
     names: set[str] = set()
     for prefix in ("claude-", "codex-"):
@@ -239,9 +285,18 @@ def get_repo_and_branch(container: str) -> tuple[str, str]:
     return repo, branch
 
 
-def get_tmux_pane_lines(container: str, session_name: str, history_lines: int = 220, max_lines: int = 120) -> list[str]:
+def capture_tmux_pane(container: str, target: str, history_lines: int = 220, keep_ansi: bool = False) -> tuple[int, str]:
     start = f"-{max(20, history_lines)}"
-    rc, out, _ = run_cmd(["docker", "exec", container, "tmux", "capture-pane", "-p", "-t", session_name, "-S", start])
+    capture_cmd = ["docker", "exec", container, "tmux", "capture-pane"]
+    if keep_ansi:
+        capture_cmd.append("-e")
+    capture_cmd.extend(["-p", "-t", target, "-S", start])
+    rc, out, _ = run_cmd(capture_cmd)
+    return rc, out
+
+
+def get_tmux_pane_lines(container: str, target: str, history_lines: int = 220, max_lines: int = 120) -> list[str]:
+    rc, out = capture_tmux_pane(container=container, target=target, history_lines=history_lines)
     if rc != 0:
         return []
 
@@ -258,9 +313,32 @@ def get_tmux_pane_lines(container: str, session_name: str, history_lines: int = 
     return lines
 
 
-def get_tmux_pane_preview(container: str, session_name: str) -> list[str]:
-    lines = get_tmux_pane_lines(container=container, session_name=session_name, history_lines=140, max_lines=120)
+def get_tmux_pane_preview(container: str, target: str) -> list[str]:
+    lines = get_tmux_pane_lines(container=container, target=target, history_lines=140, max_lines=120)
     return lines[-14:]
+
+
+def codex_prompt_still_contains_message(container: str, target: str, message: str) -> bool:
+    """Detect if Codex still has an unsent draft after one submit keypress."""
+    last_line = message.splitlines()[-1].strip() if message.splitlines() else ""
+    if not last_line:
+        return False
+
+    rc, raw = capture_tmux_pane(container=container, target=target, history_lines=80, keep_ansi=True)
+    if rc != 0 or not raw:
+        return False
+
+    for line in reversed(raw.splitlines()[-24:]):
+        normalized = ANSI_RE.sub("", line).replace("\r", "")
+        if last_line not in normalized:
+            continue
+        # Unsent prompt line renders as bold prompt (`1m`), while submitted history
+        # uses dim prompt styling (`1;2m`) in Codex.
+        if ("\x1b[1m›" in line or "\x1b[0;1m›" in line) and "\x1b[1;2m›" not in line:
+            return True
+        return False
+
+    return False
 
 
 def read_recent_jsonl_files(base_dir: Path, limit: int = 120) -> list[Path]:
@@ -512,10 +590,12 @@ def collect_status(wait_threshold_seconds: int = 45) -> dict[str, Any]:
         repo_path = ""
         branch = ""
         pane_preview: list[str] = []
+        pane_target = llm_type
         if running:
             repo_path, branch = get_repo_and_branch(container)
         if tmux_ready:
-            pane_preview = get_tmux_pane_preview(container, llm_type)
+            pane_target = resolve_tmux_target_pane(container, llm_type)
+            pane_preview = get_tmux_pane_preview(container, pane_target)
 
         last_user_message = find_last_user_message(llm_type, repo_path, branch, pane_preview)
         instance = derive_instance_name(container)
@@ -541,6 +621,7 @@ def collect_status(wait_threshold_seconds: int = 45) -> dict[str, Any]:
                 "shell": f"./{cmd_prefix}-shell {instance}",
                 "stop": f"./{cmd_prefix}-stop {instance}",
             },
+            "pane_target": pane_target,
         }
         items.append(item)
 
@@ -573,11 +654,13 @@ def pane_snapshot(container: str, max_lines: int = 120) -> dict[str, Any]:
     if rc != 0:
         return {"ok": False, "error": "tmux session not found"}
 
-    lines = get_tmux_pane_lines(container=container, session_name=session, history_lines=260, max_lines=max_lines)
+    target = resolve_tmux_target_pane(container, session)
+    lines = get_tmux_pane_lines(container=container, target=target, history_lines=260, max_lines=max_lines)
     return {
         "ok": True,
         "container": container,
         "session": session,
+        "pane_target": target,
         "timestamp": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "preview_lines": lines,
     }
@@ -598,40 +681,34 @@ def send_chat_message(container: str, message: str) -> tuple[bool, str]:
     rc, _, _ = run_cmd(["docker", "exec", container, "tmux", "has-session", "-t", session], timeout=3)
     if rc != 0:
         return False, "tmux session not found"
+    target = resolve_tmux_target_pane(container, session)
 
-    message = message.rstrip("\n")
+    message = message.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n")
     if not message:
         return False, "message is empty"
 
-    payload_hex = json.dumps(message).encode("utf-8").hex()
-    shell_script = textwrap.dedent(
-        f"""
-        set -e
-        python3 - <<'PY'
-import json
-import subprocess
+    lines = message.splitlines() or [message]
+    for idx, line in enumerate(lines):
+        if line:
+            rc, _out, err = run_cmd(["docker", "exec", container, "tmux", "send-keys", "-t", target, "-l", line], timeout=4)
+            if rc != 0:
+                return False, err or "failed to send message"
+        if idx < len(lines) - 1:
+            rc, _out, err = run_cmd(["docker", "exec", container, "tmux", "send-keys", "-t", target, "C-m"], timeout=4)
+            if rc != 0:
+                return False, err or "failed to send message"
 
-hex_data = {payload_hex!r}
-message = json.loads(bytes.fromhex(hex_data).decode("utf-8"))
-session = {session!r}
-
-lines = message.splitlines()
-if not lines:
-    lines = [message]
-
-for idx, line in enumerate(lines):
-    if line:
-        subprocess.run(["tmux", "send-keys", "-t", session, "-l", line], check=True)
-    if idx < len(lines) - 1:
-        subprocess.run(["tmux", "send-keys", "-t", session, "C-m"], check=True)
-
-subprocess.run(["tmux", "send-keys", "-t", session, "C-m"], check=True)
-PY
-        """
-    ).strip()
-    rc, _out, err = docker_exec(container, shell_script, timeout=6)
+    rc, _out, err = run_cmd(["docker", "exec", container, "tmux", "send-keys", "-t", target, "C-m"], timeout=4)
     if rc != 0:
         return False, err or "failed to send message"
+
+    # Codex occasionally keeps the draft in the prompt after one submit key.
+    # If we detect that state, send one more submit keypress.
+    if llm_type == "codex" and codex_prompt_still_contains_message(container, target, message):
+        rc, _out, err = run_cmd(["docker", "exec", container, "tmux", "send-keys", "-t", target, "C-m"], timeout=4)
+        if rc != 0:
+            return False, err or "failed to confirm message submit"
+
     return True, ""
 
 
