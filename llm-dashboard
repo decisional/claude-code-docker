@@ -603,23 +603,30 @@ def send_chat_message(container: str, message: str) -> tuple[bool, str]:
     if not message:
         return False, "message is empty"
 
-    payload_b64 = json.dumps(message).encode("utf-8").hex()
+    payload_hex = json.dumps(message).encode("utf-8").hex()
     shell_script = textwrap.dedent(
         f"""
         set -e
         python3 - <<'PY'
 import json
-import sys
+import subprocess
 
-hex_data = {payload_b64!r}
+hex_data = {payload_hex!r}
 message = json.loads(bytes.fromhex(hex_data).decode("utf-8"))
-sys.stdout.write(message)
+session = {session!r}
+
+lines = message.splitlines()
+if not lines:
+    lines = [message]
+
+for idx, line in enumerate(lines):
+    if line:
+        subprocess.run(["tmux", "send-keys", "-t", session, "-l", line], check=True)
+    if idx < len(lines) - 1:
+        subprocess.run(["tmux", "send-keys", "-t", session, "C-m"], check=True)
+
+subprocess.run(["tmux", "send-keys", "-t", session, "C-m"], check=True)
 PY
-        > /tmp/.llm_dashboard_msg.txt
-        tmux load-buffer /tmp/.llm_dashboard_msg.txt
-        tmux paste-buffer -t {shlex.quote(session)}
-        tmux send-keys -t {shlex.quote(session)} Enter
-        rm -f /tmp/.llm_dashboard_msg.txt
         """
     ).strip()
     rc, _out, err = docker_exec(container, shell_script, timeout=6)
