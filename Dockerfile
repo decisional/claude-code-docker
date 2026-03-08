@@ -5,11 +5,13 @@ ARG USER_ID=1000
 ARG GROUP_ID=1000
 
 # Install system dependencies including Git, zsh, jq, and GitHub CLI
-RUN apt-get update && apt-get install -y \
+# APT sandboxed signature verification can fail in some Docker/BuildKit environments.
+RUN apt-get -o APT::Sandbox::User=root update && apt-get install -y --no-install-recommends \
     git \
     curl \
     ca-certificates \
     zsh \
+    tmux \
     wget \
     jq \
     libpq-dev \
