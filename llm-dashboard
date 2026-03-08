@@ -10,6 +10,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import textwrap
 import time
 from dataclasses import dataclass
@@ -1249,6 +1250,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self._write_json({"ok": True, "container": container})
 
 
+class QuietThreadingHTTPServer(ThreadingHTTPServer):
+    def handle_error(self, _request: Any, _client_address: Any) -> None:
+        _, exc, _ = sys.exc_info()
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError, TimeoutError)):
+            return
+        super().handle_error(_request, _client_address)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a local dashboard for Claude/Codex container sessions")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
@@ -1272,7 +1281,7 @@ def main() -> int:
         return 0
 
     DashboardHandler.wait_threshold_seconds = args.wait_threshold_seconds
-    server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
+    server = QuietThreadingHTTPServer((args.host, args.port), DashboardHandler)
     print(f"Dashboard listening on http://{args.host}:{args.port}")
     print("Press Ctrl-C to stop")
     try:
