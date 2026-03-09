@@ -52,6 +52,18 @@ echo "🚀 Starting Codex CLI instance: $INSTANCE_NAME"
 echo "   Project: $PROJECT_NAME"
 echo ""
 
+# Sync Codex credentials from host to codex-data (mounted into container)
+if [ -f "$HOME/.codex/auth.json" ]; then
+    cp "$HOME/.codex/auth.json" "$SCRIPT_DIR/codex-data/auth.json"
+    chmod 600 "$SCRIPT_DIR/codex-data/auth.json"
+    echo "✓ Synced Codex credentials from host"
+fi
+if [ -f "$HOME/.codex/config.toml" ]; then
+    cp "$HOME/.codex/config.toml" "$SCRIPT_DIR/codex-data/config.toml"
+    echo "✓ Synced Codex config from host"
+fi
+echo ""
+
 # Build environment override for branch if specified
 ENV_OVERRIDE="-e LLM_TYPE=codex"
 VOLUME_OVERRIDE=""
