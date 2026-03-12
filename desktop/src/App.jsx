@@ -32,10 +32,6 @@ function repoNameFromPath(repoPath) {
   return parts[parts.length - 1] || repoPath;
 }
 
-function runtimeMonogram(runtime) {
-  return runtime === "codex" ? "OX" : "CL";
-}
-
 function SessionTerminal({ sessionId, active }) {
   const containerRef = useRef(null);
   const terminalRef = useRef(null);
@@ -163,10 +159,6 @@ function SessionSignal({ state }) {
   }
 
   return null;
-}
-
-function SessionMonogram({ runtime }) {
-  return <span className={`session-monogram runtime-${runtime}`}>{runtimeMonogram(runtime)}</span>;
 }
 
 function NewSessionForm({ onCreate, disabled }) {
@@ -419,17 +411,19 @@ export default function App() {
             </button>
           </div>
 
-          <div className="sidebar-summary">
-            <button className="repo-button" type="button" onClick={chooseRepo}>
+          <div className="workspace-row">
+            <div className="workspace-copy">
               <span className="repo-label">Workspace</span>
               <span className="repo-name">{repoName}</span>
-              <span className="repo-path">{settings.repoPath || "Choose the claude-code-docker repository"}</span>
-            </button>
-
-            <div className="sidebar-meta">
-              <span>{sessions.length} total</span>
-              <span>{liveSessionCount} live</span>
             </div>
+            <button className="repo-button" type="button" onClick={chooseRepo}>
+              Change
+            </button>
+          </div>
+
+          <div className="sidebar-meta">
+            <span>{sessions.length} total</span>
+            <span>{liveSessionCount} live</span>
           </div>
 
           {showComposer ? <NewSessionForm onCreate={handleCreate} disabled={busy} /> : null}
@@ -454,23 +448,19 @@ export default function App() {
                 onClick={() => selectSession(session.id)}
               >
                 <div className="session-item-main">
-                  <SessionMonogram runtime={session.runtime} />
-
                   <div className="session-copy">
                     <div className="session-title-line">
-                      <span className="session-title">{session.name}</span>
+                      <div className="session-title-block">
+                        <span className="session-title">{session.name}</span>
+                        <span className={`session-runtime runtime-${session.runtime}`}>{runtimeLabel(session.runtime)}</span>
+                      </div>
                       <div className="session-inline-badges">
                         <SessionSignal state={sessionSignals[session.id]} />
                         <StatusBadge session={session} />
                       </div>
                     </div>
 
-                    <div className="session-meta-line">
-                      <span className="session-runtime">{runtimeLabel(session.runtime)}</span>
-                      <span className="session-divider" />
-                      <span className="session-subtle">{session.dockerStatus || "Waiting for container state"}</span>
-                    </div>
-
+                    <div className="session-subtle">{session.dockerStatus || "Waiting for container state"}</div>
                     <SessionFacts session={session} className="session-facts compact" />
                   </div>
                 </div>
@@ -565,9 +555,10 @@ export default function App() {
         ) : (
           <section className="empty-main">
             <div className="empty-panel">
+              <div className="empty-mark">A</div>
               <div className="eyebrow">Autodex desktop</div>
-              <h2>Pick a session to open its terminal.</h2>
-              <p>Keep Claude and Codex Docker work in one calm workspace.</p>
+              <h2>Manage Claude and Codex sessions in one place.</h2>
+              <p>Select a session from the sidebar or start a new one.</p>
             </div>
           </section>
         )}
