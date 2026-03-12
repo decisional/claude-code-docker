@@ -12,6 +12,11 @@ AGENTS.md
 .env
 project.env
 .build-temp/
+desktop/node_modules/
+desktop/dist/
+desktop/.vite/
+desktop/release/
+desktop/out/
 
 # Docker
 .dockerignore

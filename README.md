@@ -18,6 +18,24 @@ This environment supports both Claude Code and OpenAI Codex CLI. You can run ins
 
 Both share the same Git configuration, SSH keys, and GitHub CLI setup, so all GitHub operations (clone, push, PR creation) work identically for both.
 
+## Desktop App Preview
+
+This repo now also includes a first-pass desktop shell in `desktop/README.md`.
+
+It gives you:
+- one window for all Claude and Codex sessions
+- a left sidebar of sessions
+- an embedded interactive terminal for each attached session
+- stop, reset, and remove actions from the UI
+
+Run it locally from this repo:
+
+```bash
+cd desktop
+npm install
+npm run dev
+```
+
 ## Setup
 
 ### Option 1: Build Image with Credentials Baked In (Recommended)
