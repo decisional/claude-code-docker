@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("desktopApi", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
@@ -11,7 +11,18 @@ contextBridge.exposeInMainWorld("desktopApi", {
   removeSession: payload => ipcRenderer.invoke("sessions:remove", payload),
   sendInput: payload => ipcRenderer.invoke("sessions:input", payload),
   resizeSession: payload => ipcRenderer.invoke("sessions:resize", payload),
+  readClipboardText: () => ipcRenderer.invoke("clipboard:read-text"),
   readClipboardFilePaths: () => ipcRenderer.invoke("clipboard:read-file-paths"),
+  resolveClipboardFiles: files =>
+    files
+      .map(file => {
+        try {
+          return webUtils.getPathForFile(file);
+        } catch {
+          return "";
+        }
+      })
+      .filter(Boolean),
   onTerminalData: handler => {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on("terminal:data", listener);

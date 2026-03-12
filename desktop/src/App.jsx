@@ -15,6 +15,8 @@ const STATUS_LABELS = {
   error: "Error",
 };
 
+const SHELL_SAFE_PATH_RE = /^[A-Za-z0-9_./:@%+=,-]+$/;
+
 function runtimeLabel(runtime) {
   return runtime === "codex" ? "Codex" : "Claude";
 }
@@ -30,6 +32,51 @@ function repoNameFromPath(repoPath) {
 
   const parts = repoPath.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] || repoPath;
+}
+
+function escapePathForShell(filePath) {
+  if (!filePath) {
+    return "";
+  }
+
+  if (SHELL_SAFE_PATH_RE.test(filePath)) {
+    return filePath;
+  }
+
+  return `'${filePath.replaceAll("'", "'\\''")}'`;
+}
+
+function formatPathsForTerminal(paths) {
+  return paths.map(escapePathForShell).filter(Boolean).join(" ");
+}
+
+function clipboardPathsFromText(text) {
+  const entries = text
+    .split(/\r?\n/)
+    .map(entry => entry.trim())
+    .filter(Boolean);
+
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const paths = entries.map(entry => {
+    if (entry.startsWith("file://")) {
+      try {
+        return decodeURIComponent(new URL(entry).pathname);
+      } catch {
+        return "";
+      }
+    }
+
+    if (entry.startsWith("/") || /^[A-Za-z]:[\\/]/.test(entry)) {
+      return entry;
+    }
+
+    return "";
+  });
+
+  return paths.every(Boolean) ? paths : [];
 }
 
 function SessionTerminal({ sessionId, active }) {
@@ -81,6 +128,13 @@ function SessionTerminal({ sessionId, active }) {
     });
 
     const handlePaste = async event => {
+      const pastedFilePaths = window.desktopApi.resolveClipboardFiles(Array.from(event.clipboardData?.files || []));
+      if (pastedFilePaths.length > 0) {
+        event.preventDefault();
+        window.desktopApi.sendInput({ sessionId, data: formatPathsForTerminal(pastedFilePaths) });
+        return;
+      }
+
       const text = event.clipboardData?.getData("text/plain");
       if (text) {
         return; // xterm handles normal text paste
@@ -89,10 +143,19 @@ function SessionTerminal({ sessionId, active }) {
       event.preventDefault();
 
       try {
+        const clipboardText = await window.desktopApi.readClipboardText();
+        if (clipboardText) {
+          const textPaths = clipboardPathsFromText(clipboardText);
+          window.desktopApi.sendInput({
+            sessionId,
+            data: textPaths.length > 0 ? formatPathsForTerminal(textPaths) : clipboardText,
+          });
+          return;
+        }
+
         const paths = await window.desktopApi.readClipboardFilePaths();
         if (paths && paths.length > 0) {
-          const escaped = paths.map(p => (p.includes(" ") ? `'${p}'` : p));
-          window.desktopApi.sendInput({ sessionId, data: escaped.join(" ") });
+          window.desktopApi.sendInput({ sessionId, data: formatPathsForTerminal(paths) });
         }
       } catch {
         // Clipboard read failed, ignore.
