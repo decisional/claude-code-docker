@@ -5,6 +5,37 @@ import "@xterm/xterm/css/xterm.css";
 
 const EMPTY_SESSIONS = [];
 
+const STATUS_LABELS = {
+  attached: "Attached",
+  running: "Running",
+  starting: "Starting",
+  stopped: "Stopped",
+  exited: "Stopped",
+  detached: "Closed",
+  error: "Error",
+};
+
+function runtimeLabel(runtime) {
+  return runtime === "codex" ? "Codex" : "Claude";
+}
+
+function statusLabel(status) {
+  return STATUS_LABELS[status] || status || "Unknown";
+}
+
+function repoNameFromPath(repoPath) {
+  if (!repoPath) {
+    return "Choose repository";
+  }
+
+  const parts = repoPath.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || repoPath;
+}
+
+function runtimeMonogram(runtime) {
+  return runtime === "codex" ? "OX" : "CL";
+}
+
 function SessionTerminal({ sessionId, active }) {
   const containerRef = useRef(null);
   const terminalRef = useRef(null);
@@ -20,10 +51,10 @@ function SessionTerminal({ sessionId, active }) {
       fontSize: 13,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       theme: {
-        background: "#111111",
-        foreground: "#e8e6e3",
+        background: "#0d0f14",
+        foreground: "#eceff4",
         cursor: "#ffffff",
-        selectionBackground: "#2b2b2b",
+        selectionBackground: "#2d3340",
       },
       scrollback: 10000,
       allowTransparency: false,
@@ -76,6 +107,7 @@ function SessionTerminal({ sessionId, active }) {
     if (!active) {
       return;
     }
+
     setTimeout(() => {
       if (fitRef.current && terminalRef.current) {
         try {
@@ -98,7 +130,7 @@ function SessionTerminal({ sessionId, active }) {
 
 function StatusBadge({ session }) {
   const status = session.status || "unknown";
-  return <span className={`status-badge status-${status}`}>{status}</span>;
+  return <span className={`status-badge status-${status}`}>{statusLabel(status)}</span>;
 }
 
 function SessionFacts({ session, className = "session-facts" }) {
@@ -127,10 +159,14 @@ function SessionSignal({ state }) {
   }
 
   if (state === "attention") {
-    return <span className="session-signal attention">Requires attention</span>;
+    return <span className="session-signal attention">New output</span>;
   }
 
   return null;
+}
+
+function SessionMonogram({ runtime }) {
+  return <span className={`session-monogram runtime-${runtime}`}>{runtimeMonogram(runtime)}</span>;
 }
 
 function NewSessionForm({ onCreate, disabled }) {
@@ -144,12 +180,14 @@ function NewSessionForm({ onCreate, disabled }) {
     if (!name.trim()) {
       return;
     }
+
     await onCreate({
       runtime,
       name: name.trim(),
       branch: branch.trim(),
       port: runtime === "claude" ? port.trim() : "",
     });
+
     setName("");
     setBranch("");
     setPort("");
@@ -178,9 +216,14 @@ function NewSessionForm({ onCreate, disabled }) {
       {runtime === "claude" ? (
         <input value={port} onChange={event => setPort(event.target.value)} placeholder="port (optional)" />
       ) : null}
-      <button className="primary" type="submit" disabled={disabled || !name.trim()}>
-        New session
-      </button>
+      <div className="composer-footer">
+        <div className="composer-hint">
+          {runtime === "claude" ? "Optional branch and dev port override." : "Optional branch override for the container."}
+        </div>
+        <button className="primary" type="submit" disabled={disabled || !name.trim()}>
+          Create session
+        </button>
+      </div>
     </form>
   );
 }
@@ -351,28 +394,43 @@ export default function App() {
     }
   };
 
+  const repoName = repoNameFromPath(settings.repoPath);
+  const liveSessionCount = sessions.filter(session => ["attached", "running", "starting"].includes(session.status)).length;
+
   if (loading) {
-    return <div className="boot-screen">Loading desktop shell…</div>;
+    return <div className="boot-screen">Loading desktop workspace...</div>;
   }
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="sidebar-header">
-          <div>
-            <div className="eyebrow">Claude Code Docker</div>
-            <h1>Sessions</h1>
+        <div className="sidebar-top">
+          <div className="sidebar-header">
+            <div>
+              <div className="eyebrow">Autodex desktop</div>
+              <h1>Sessions</h1>
+            </div>
+            <button
+              className={showComposer ? "icon-button active" : "icon-button"}
+              type="button"
+              onClick={() => setShowComposer(current => !current)}
+            >
+              {showComposer ? "Close" : "New"}
+            </button>
           </div>
-          <button className="icon-button" type="button" onClick={() => setShowComposer(current => !current)}>
-            +
-          </button>
-        </div>
 
-        <div className="sidebar-tools">
-          <button className="repo-button" type="button" onClick={chooseRepo}>
-            <span className="repo-label">Repository</span>
-            <span className="repo-path">{settings.repoPath || "Choose repository"}</span>
-          </button>
+          <div className="sidebar-summary">
+            <button className="repo-button" type="button" onClick={chooseRepo}>
+              <span className="repo-label">Workspace</span>
+              <span className="repo-name">{repoName}</span>
+              <span className="repo-path">{settings.repoPath || "Choose the claude-code-docker repository"}</span>
+            </button>
+
+            <div className="sidebar-meta">
+              <span>{sessions.length} total</span>
+              <span>{liveSessionCount} live</span>
+            </div>
+          </div>
 
           {showComposer ? <NewSessionForm onCreate={handleCreate} disabled={busy} /> : null}
         </div>
@@ -395,18 +453,27 @@ export default function App() {
                 type="button"
                 onClick={() => selectSession(session.id)}
               >
-                <div className="session-title-row">
-                  <div className="session-title-stack">
-                    <span className="session-title">{session.name}</span>
-                    <span className="session-runtime">{session.runtime}</span>
-                  </div>
-                  <div className="session-title-actions">
-                    <SessionSignal state={sessionSignals[session.id]} />
-                    <StatusBadge session={session} />
+                <div className="session-item-main">
+                  <SessionMonogram runtime={session.runtime} />
+
+                  <div className="session-copy">
+                    <div className="session-title-line">
+                      <span className="session-title">{session.name}</span>
+                      <div className="session-inline-badges">
+                        <SessionSignal state={sessionSignals[session.id]} />
+                        <StatusBadge session={session} />
+                      </div>
+                    </div>
+
+                    <div className="session-meta-line">
+                      <span className="session-runtime">{runtimeLabel(session.runtime)}</span>
+                      <span className="session-divider" />
+                      <span className="session-subtle">{session.dockerStatus || "Waiting for container state"}</span>
+                    </div>
+
+                    <SessionFacts session={session} className="session-facts compact" />
                   </div>
                 </div>
-                <div className="session-subtle">{session.dockerStatus || "Waiting for container state"}</div>
-                <SessionFacts session={session} className="session-facts compact" />
               </button>
             ))}
           </div>
@@ -418,12 +485,20 @@ export default function App() {
         {activeSession ? (
           <>
             <header className="main-header">
-              <div>
-                <div className="eyebrow">{activeSession.runtime}</div>
+              <div className="main-heading">
+                <div className="header-chip-row">
+                  <span className={`runtime-chip runtime-${activeSession.runtime}`}>{runtimeLabel(activeSession.runtime)}</span>
+                  <StatusBadge session={activeSession} />
+                </div>
                 <h2>{activeSession.name}</h2>
-                <div className="terminal-subtitle">{activeSession.dockerStatus || "Ready"}</div>
-                <SessionFacts session={activeSession} className="session-facts" />
+                <div className="header-status-row">
+                  <span>{activeSession.dockerStatus || "Ready"}</span>
+                  <span className="header-divider" />
+                  <span className="header-path">{settings.repoPath || "Repository not selected"}</span>
+                </div>
+                <SessionFacts session={activeSession} className="session-facts detail-facts" />
               </div>
+
               <div className="action-row">
                 <button
                   className="secondary"
@@ -464,13 +539,24 @@ export default function App() {
               </div>
             </header>
 
-            <section className="terminal-frame">
-              <div className="terminal-shell-bar">
-                <span className="terminal-shell-dot" />
-                <span className="terminal-shell-dot" />
-                <span className="terminal-shell-dot" />
-                <span className="terminal-shell-label">{activeSession.runtime === "codex" ? "Codex session" : "Claude session"}</span>
+            <section className="terminal-stage">
+              <div className="terminal-toolbar">
+                <div className="terminal-toolbar-main">
+                  <span className="terminal-shell-dot" />
+                  <span className="terminal-shell-dot" />
+                  <span className="terminal-shell-dot" />
+                  <div className="terminal-label-group">
+                    <span className="terminal-shell-label">{runtimeLabel(activeSession.runtime)} session</span>
+                    <span className="terminal-shell-meta">{activeSession.containerName}</span>
+                  </div>
+                </div>
+
+                <div className="terminal-toolbar-aside">
+                  {activeSession.branch ? <span className="terminal-chip">branch {activeSession.branch}</span> : null}
+                  {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
+                </div>
               </div>
+
               {sessions.map(session => (
                 <SessionTerminal key={session.id} sessionId={session.id} active={session.id === activeSessionId} />
               ))}
@@ -479,9 +565,9 @@ export default function App() {
         ) : (
           <section className="empty-main">
             <div className="empty-panel">
-              <div className="eyebrow">Desktop shell</div>
-              <h2>Pick a session or create one.</h2>
-              <p>This surface keeps all Claude and Codex Docker sessions in one place.</p>
+              <div className="eyebrow">Autodex desktop</div>
+              <h2>Pick a session to open its terminal.</h2>
+              <p>Keep Claude and Codex Docker work in one calm workspace.</p>
             </div>
           </section>
         )}

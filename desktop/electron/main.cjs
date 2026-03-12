@@ -1,10 +1,12 @@
 const { app, BrowserWindow, dialog, ipcMain, Notification, nativeTheme } = require("electron");
 const fs = require("fs/promises");
+const os = require("os");
 const path = require("path");
 const { execFile, spawn } = require("child_process");
 const pty = require("node-pty");
 
 const liveSessions = new Map();
+const notificationCooldowns = new Map();
 let mainWindow = null;
 let storePath = "";
 let appState = {
@@ -21,6 +23,16 @@ const DEFAULT_WINDOW = {
   minWidth: 980,
   minHeight: 640,
 };
+
+const COMMON_BIN_PATHS = [
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+  "/usr/bin",
+  "/bin",
+  "/usr/sbin",
+  "/sbin",
+  path.join(os.homedir(), ".docker", "bin"),
+];
 
 function createDefaultState() {
   return {
@@ -131,19 +143,48 @@ function emit(channel, payload) {
   mainWindow.webContents.send(channel, payload);
 }
 
+function buildRuntimeEnv(overrides = {}) {
+  const nextEnv = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(([, value]) => value !== undefined && value !== null)
+    ),
+    ...Object.fromEntries(
+      Object.entries(overrides).filter(([, value]) => value !== undefined && value !== null)
+    ),
+  };
+
+  const existingPathEntries = String(nextEnv.PATH || "")
+    .split(path.delimiter)
+    .filter(Boolean);
+  const dedupedPathEntries = [...new Set([...COMMON_BIN_PATHS, ...existingPathEntries])];
+
+  nextEnv.PATH = dedupedPathEntries.join(path.delimiter);
+  return nextEnv;
+}
+
+process.env.PATH = buildRuntimeEnv().PATH;
+
 async function runCommand(filePath, args = [], options = {}) {
   return new Promise((resolve, reject) => {
-    execFile(filePath, args, options, (error, stdout, stderr) => {
-      if (error) {
-        reject({
-          error,
-          stdout,
-          stderr,
-        });
-        return;
+    execFile(
+      filePath,
+      args,
+      {
+        ...options,
+        env: buildRuntimeEnv(options.env),
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject({
+            error,
+            stdout,
+            stderr,
+          });
+          return;
+        }
+        resolve({ stdout, stderr });
       }
-      resolve({ stdout, stderr });
-    });
+    );
   });
 }
 
@@ -229,9 +270,19 @@ function sessionScripts(runtime) {
   };
 }
 
-function notifyIfHidden(title, body) {
+function notifyIfHidden(title, body, options = {}) {
   if (!mainWindow || mainWindow.isFocused()) {
     return;
+  }
+
+  const cooldownKey = options.cooldownKey || "";
+  const cooldownMs = options.cooldownMs || 0;
+  if (cooldownKey && cooldownMs > 0) {
+    const lastSentAt = notificationCooldowns.get(cooldownKey) || 0;
+    if (Date.now() - lastSentAt < cooldownMs) {
+      return;
+    }
+    notificationCooldowns.set(cooldownKey, Date.now());
   }
 
   try {
@@ -261,9 +312,7 @@ async function startInteractiveSession(session, mode = "start", size = { cols: 1
   }
 
   const repoPath = currentRepoPath();
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(([, value]) => value !== undefined && value !== null)
-  );
+  const env = buildRuntimeEnv();
 
   let term;
   try {
@@ -304,7 +353,10 @@ async function startInteractiveSession(session, mode = "start", size = { cols: 1
     emit("terminal:data", { sessionId: session.id, data });
 
     if (!mainWindow?.isFocused()) {
-      notifyIfHidden(session.name, "Session received output.");
+      notifyIfHidden(session.name, "Session received output.", {
+        cooldownKey: `session-output:${session.id}`,
+        cooldownMs: 15000,
+      });
     }
   });
 
@@ -335,7 +387,7 @@ async function runDetachedScript(runtime, action, name) {
   await new Promise((resolve, reject) => {
     const child = spawn(scriptPath, [name], {
       cwd: currentRepoPath(),
-      env: process.env,
+      env: buildRuntimeEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -375,6 +427,10 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
   }
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 }
 
 function validateRepoPath(repoPath) {
@@ -397,6 +453,12 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
+  }
+});
+
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
   }
 });
 
