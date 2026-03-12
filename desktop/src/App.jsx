@@ -4,6 +4,8 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
 const EMPTY_SESSIONS = [];
+const SIDEBAR_STORAGE_KEY = "autodex-desktop:sidebar-collapsed";
+const SIDEBAR_SHORTCUT_KEY = "b";
 
 const STATUS_LABELS = {
   attached: "Attached",
@@ -32,6 +34,63 @@ function repoNameFromPath(repoPath) {
 
   const parts = repoPath.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] || repoPath;
+}
+
+function normalizeSessionName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+function buildSuggestedSessionName(runtime, sessions, branch = "") {
+  const existingNames = new Set(sessions.filter(session => session.runtime === runtime).map(session => session.name));
+  const baseName = normalizeSessionName(branch) || "session-01";
+
+  if (!existingNames.has(baseName)) {
+    return baseName;
+  }
+
+  if (baseName !== "session-01") {
+    let branchIndex = 2;
+
+    while (existingNames.has(`${baseName}-${String(branchIndex).padStart(2, "0")}`)) {
+      branchIndex += 1;
+    }
+
+    return `${baseName}-${String(branchIndex).padStart(2, "0")}`;
+  }
+
+  let sessionIndex = 2;
+
+  while (existingNames.has(`session-${String(sessionIndex).padStart(2, "0")}`)) {
+    sessionIndex += 1;
+  }
+
+  return `session-${String(sessionIndex).padStart(2, "0")}`;
+}
+
+function sessionMonogram(name) {
+  const parts = String(name || "")
+    .split(/[\s-]+/)
+    .map(part => part.trim())
+    .filter(Boolean);
+
+  if (parts.length >= 2) {
+    return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+  }
+
+  return String(name || "S")
+    .replace(/[^a-z0-9]/gi, "")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function sessionTitle(session) {
+  const facts = [runtimeLabel(session.runtime), session.branch ? `branch ${session.branch}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
+  return [session.name, facts.join(" | "), session.dockerStatus || ""].filter(Boolean).join("\n");
 }
 
 function escapePathForShell(filePath) {
@@ -101,10 +160,10 @@ function SessionTerminal({ sessionId, active }) {
       fontSize: 13,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       theme: {
-        background: "#0d0f14",
-        foreground: "#eceff4",
-        cursor: "#ffffff",
-        selectionBackground: "#2d3340",
+        background: "#0d1017",
+        foreground: "#edf2f7",
+        cursor: "#f7fafc",
+        selectionBackground: "#243244",
       },
       scrollback: 10000,
       allowTransparency: false,
@@ -137,7 +196,7 @@ function SessionTerminal({ sessionId, active }) {
 
       const text = event.clipboardData?.getData("text/plain");
       if (text) {
-        return; // xterm handles normal text paste
+        return;
       }
 
       event.preventDefault();
@@ -158,11 +217,10 @@ function SessionTerminal({ sessionId, active }) {
           window.desktopApi.sendInput({ sessionId, data: formatPathsForTerminal(paths) });
         }
       } catch {
-        // Clipboard read failed, ignore.
+        // Ignore clipboard failures in the terminal.
       }
     };
 
-    // Attach to xterm's internal textarea where paste events actually fire
     const pasteTarget = terminal.textarea;
     if (pasteTarget) {
       pasteTarget.addEventListener("paste", handlePaste);
@@ -173,7 +231,11 @@ function SessionTerminal({ sessionId, active }) {
         clearTimeout(resizeTimerRef.current);
         resizeTimerRef.current = null;
       }
-      pasteTarget.removeEventListener("paste", handlePaste);
+
+      if (pasteTarget) {
+        pasteTarget.removeEventListener("paste", handlePaste);
+      }
+
       onData();
       terminal.dispose();
       terminalRef.current = null;
@@ -183,7 +245,7 @@ function SessionTerminal({ sessionId, active }) {
 
   useEffect(() => {
     if (!active) {
-      return;
+      return undefined;
     }
 
     const resize = () => {
@@ -219,7 +281,7 @@ function SessionTerminal({ sessionId, active }) {
           rows: nextSize.rows,
         });
       } catch {
-        // Ignore during teardown.
+        // Ignore resize noise during teardown.
       }
     };
 
@@ -297,62 +359,148 @@ function SessionSignal({ state }) {
   return null;
 }
 
-function NewSessionForm({ onCreate, disabled }) {
+function SessionAvatar({ session }) {
+  return <span className={`session-avatar runtime-${session.runtime}`}>{sessionMonogram(session.name)}</span>;
+}
+
+function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate }) {
   const [runtime, setRuntime] = useState("claude");
   const [name, setName] = useState("");
   const [branch, setBranch] = useState("");
   const [port, setPort] = useState("");
+  const [showDetails, setShowDetails] = useState(false);
+
+  const normalizedName = useMemo(() => normalizeSessionName(name), [name]);
+  const suggestedName = useMemo(() => buildSuggestedSessionName(runtime, sessions, branch), [runtime, sessions, branch]);
+  const resolvedName = normalizedName || suggestedName;
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const handleKeyDown = event => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) {
+    return null;
+  }
 
   const submit = async event => {
     event.preventDefault();
-    if (!name.trim()) {
-      return;
-    }
 
     await onCreate({
       runtime,
-      name: name.trim(),
+      name: resolvedName,
       branch: branch.trim(),
       port: runtime === "claude" ? port.trim() : "",
     });
-
-    setName("");
-    setBranch("");
-    setPort("");
   };
 
   return (
-    <form className="new-session-form" onSubmit={submit}>
-      <div className="field-row">
-        <button
-          className={runtime === "claude" ? "toggle active" : "toggle"}
-          type="button"
-          onClick={() => setRuntime("claude")}
-        >
-          Claude
-        </button>
-        <button
-          className={runtime === "codex" ? "toggle active" : "toggle"}
-          type="button"
-          onClick={() => setRuntime("codex")}
-        >
-          Codex
-        </button>
-      </div>
-      <input value={name} onChange={event => setName(event.target.value)} placeholder="session name" />
-      <input value={branch} onChange={event => setBranch(event.target.value)} placeholder="branch (optional)" />
-      {runtime === "claude" ? (
-        <input value={port} onChange={event => setPort(event.target.value)} placeholder="port (optional)" />
-      ) : null}
-      <div className="composer-footer">
-        <div className="composer-hint">
-          {runtime === "claude" ? "Optional branch and dev port override." : "Optional branch override for the container."}
+    <div className="overlay-root" role="presentation" onClick={onClose}>
+      <div
+        aria-labelledby="session-composer-title"
+        aria-modal="true"
+        className="overlay-card"
+        role="dialog"
+        onClick={event => event.stopPropagation()}
+      >
+        <div className="overlay-header">
+          <div className="overlay-heading">
+            <span className="eyebrow">New session</span>
+            <h3 id="session-composer-title">Start fast, customize only if you need to</h3>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose}>
+            x
+          </button>
         </div>
-        <button className="primary" type="submit" disabled={disabled || !name.trim()}>
-          Create session
-        </button>
+
+        <form className="overlay-form" onSubmit={submit}>
+          <div className="runtime-picker" role="tablist" aria-label="Session runtime">
+            <button
+              aria-selected={runtime === "claude"}
+              className={runtime === "claude" ? "runtime-button active" : "runtime-button"}
+              type="button"
+              onClick={() => setRuntime("claude")}
+            >
+              <span className="runtime-button-label">Claude</span>
+              <span className="runtime-button-copy">Includes optional app port override</span>
+            </button>
+            <button
+              aria-selected={runtime === "codex"}
+              className={runtime === "codex" ? "runtime-button active" : "runtime-button"}
+              type="button"
+              onClick={() => setRuntime("codex")}
+            >
+              <span className="runtime-button-label">Codex</span>
+              <span className="runtime-button-copy">Clean container, branch optional</span>
+            </button>
+          </div>
+
+          <div className="overlay-preview">
+            <div className="overlay-preview-row">
+              <span className={`session-avatar runtime-${runtime}`}>{runtime === "claude" ? "CL" : "CX"}</span>
+              <div className="overlay-preview-copy">
+                <span className="overlay-preview-title">{resolvedName}</span>
+                <span className="overlay-preview-text">
+                  Starts as {runtimeLabel(runtime)} with project <strong>{`${runtime}-${resolvedName}`}</strong>
+                </span>
+              </div>
+            </div>
+
+            <button
+              aria-expanded={showDetails}
+              className={showDetails ? "secondary active" : "secondary"}
+              type="button"
+              onClick={() => setShowDetails(current => !current)}
+            >
+              {showDetails ? "Hide details" : "Customize"}
+            </button>
+          </div>
+
+          {showDetails ? (
+            <div className="overlay-details">
+              <label className="overlay-field">
+                <span>Session name</span>
+                <input value={name} onChange={event => setName(event.target.value)} placeholder={suggestedName} />
+                <small>{name.trim() ? `Saved as ${resolvedName}` : `Defaults to ${suggestedName}`}</small>
+              </label>
+
+              <label className="overlay-field">
+                <span>Branch</span>
+                <input value={branch} onChange={event => setBranch(event.target.value)} placeholder="optional branch" />
+                <small>Leave blank to use the default branch for the runtime script.</small>
+              </label>
+
+              {runtime === "claude" ? (
+                <label className="overlay-field">
+                  <span>Port</span>
+                  <input value={port} onChange={event => setPort(event.target.value)} placeholder="optional port" />
+                  <small>Only used for Claude sessions that need a local dev port override.</small>
+                </label>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="overlay-footer">
+            <button className="secondary" type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="primary" type="submit" disabled={disabled}>
+              {disabled ? "Starting..." : `Start ${runtimeLabel(runtime)}`}
+            </button>
+          </div>
+        </form>
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -364,18 +512,38 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showComposer, setShowComposer] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
+  });
   const [sessionSignals, setSessionSignals] = useState({});
   const activeSessionIdRef = useRef("");
   const sessionSignalTimersRef = useRef({});
 
-  const activeSession = useMemo(
-    () => sessions.find(session => session.id === activeSessionId),
-    [sessions, activeSessionId]
-  );
+  const activeSession = useMemo(() => sessions.find(session => session.id === activeSessionId), [sessions, activeSessionId]);
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const handleKeyDown = event => {
+      if (event.key.toLowerCase() === SIDEBAR_SHORTCUT_KEY && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        setSidebarCollapsed(current => !current);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -394,6 +562,7 @@ export default function App() {
         if (ignore) {
           return;
         }
+
         setSettings(nextSettings);
         setSessions(nextSessions);
         if (!activeSessionId && nextSessions[0]) {
@@ -425,6 +594,7 @@ export default function App() {
 
         return Object.fromEntries(Object.entries(current).filter(([sessionId]) => validSessionIds.has(sessionId)));
       });
+
       const currentActive = activeSessionIdRef.current;
       const stillExists = nextSessions.some(session => session.id === currentActive);
       if (!stillExists) {
@@ -433,6 +603,7 @@ export default function App() {
         setActiveSessionId(nextSessions[0].id);
       }
     });
+
     const offTerminal = window.desktopApi.onTerminalData(({ sessionId }) => {
       if (sessionId !== activeSessionIdRef.current) {
         clearSignalTimer(sessionId);
@@ -443,6 +614,7 @@ export default function App() {
         }, 1800);
       }
     });
+
     const offExit = window.desktopApi.onTerminalExit(({ sessionId }) => {
       if (sessionId !== activeSessionIdRef.current) {
         clearSignalTimer(sessionId);
@@ -462,11 +634,13 @@ export default function App() {
 
   const selectSession = sessionId => {
     setActiveSessionId(sessionId);
+
     const timer = sessionSignalTimersRef.current[sessionId];
     if (timer) {
       clearTimeout(timer);
       delete sessionSignalTimersRef.current[sessionId];
     }
+
     setSessionSignals(current => {
       if (!current[sessionId]) {
         return current;
@@ -530,180 +704,239 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="sidebar-top">
-          <div className="sidebar-header">
-            <div>
-              <div className="eyebrow">Autodex desktop</div>
-              <h1>Sessions</h1>
-            </div>
-            <button
-              className={showComposer ? "icon-button active" : "icon-button"}
-              type="button"
-              onClick={() => setShowComposer(current => !current)}
-            >
-              {showComposer ? "Close" : "New"}
-            </button>
-          </div>
-
-          <div className="workspace-row">
-            <div className="workspace-copy">
-              <span className="repo-label">Workspace</span>
-              <span className="repo-name">{repoName}</span>
-              <span className="repo-path">{settings.repoPath || "Choose the claude-code-docker repository"}</span>
-            </div>
-            <button className="repo-button" type="button" onClick={chooseRepo}>
-              Change
-            </button>
-          </div>
-
-          <div className="sidebar-meta">
-            <span>{sessions.length} total</span>
-            <span>{liveSessionCount} live</span>
-          </div>
-
-          {showComposer ? <NewSessionForm onCreate={handleCreate} disabled={busy} /> : null}
-        </div>
-
-        <div className="session-list-panel">
-          <div className="section-label">All sessions</div>
-
-          <div className="session-list">
-            {sessions.length === 0 ? (
-              <div className="empty-sidebar">
-                <p>No sessions yet.</p>
-                <p>Start one with Claude or Codex.</p>
-              </div>
-            ) : null}
-
-            {sessions.map(session => (
-              <button
-                className={session.id === activeSessionId ? "session-item active" : "session-item"}
-                key={session.id}
-                type="button"
-                onClick={() => selectSession(session.id)}
-              >
-                <div className="session-item-main">
-                  <div className="session-copy">
-                    <div className="session-title-line">
-                      <div className="session-title-block">
-                        <span className="session-title">{session.name}</span>
-                        <div className="session-meta-text">
-                          <span className={`session-runtime runtime-${session.runtime}`}>{runtimeLabel(session.runtime)}</span>
-                          {session.branch ? <span>branch {session.branch}</span> : null}
-                          {session.port ? <span>port {session.port}</span> : null}
-                        </div>
-                      </div>
-                      <div className="session-inline-status">
-                        <SessionSignal state={sessionSignals[session.id]} />
-                        <SessionStateDot status={session.status} />
-                      </div>
-                    </div>
-
-                    <div className="session-subtle">{session.dockerStatus || "Waiting for container state"}</div>
+    <>
+      <div className={sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
+        <aside className="sidebar">
+          <div className="sidebar-top">
+            <div className="sidebar-chrome">
+              <div className="sidebar-brand">
+                <div className="brand-mark" />
+                {!sidebarCollapsed ? (
+                  <div className="brand-copy">
+                    <span className="eyebrow">Autodex desktop</span>
+                    <h1>Sessions</h1>
                   </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      </aside>
-
-      <main className="main-pane">
-        {error ? <div className="error-banner">{error}</div> : null}
-        {activeSession ? (
-          <>
-            <header className="main-header">
-              <div className="main-heading">
-                <div className="eyebrow">Active session</div>
-                <h2>{activeSession.name}</h2>
-                <div className="header-status-row">
-                  <span className={`session-runtime runtime-${activeSession.runtime}`}>{runtimeLabel(activeSession.runtime)}</span>
-                  <span className="header-divider" />
-                  <StatusBadge session={activeSession} />
-                  <span className="header-divider" />
-                  <span>{activeSession.dockerStatus || "Ready"}</span>
-                  <span className="header-divider" />
-                  <span className="header-path">{settings.repoPath || "Repository not selected"}</span>
-                </div>
-                <SessionFacts session={activeSession} className="session-facts detail-facts" />
+                ) : null}
               </div>
 
-              <div className="action-row">
-                <button
-                  className="secondary"
-                  type="button"
-                  onClick={() => perform(window.desktopApi.attachSession, { sessionId: activeSession.id }, () => selectSession(activeSession.id))}
-                  disabled={busy}
-                >
-                  Open
+              <div className="sidebar-actions">
+                <button className="icon-button strong" type="button" onClick={() => setShowComposer(true)} title="Start session">
+                  +
                 </button>
                 <button
-                  className="secondary"
+                  className="icon-button"
                   type="button"
-                  onClick={() => perform(window.desktopApi.resetSession, { sessionId: activeSession.id }, () => selectSession(activeSession.id))}
-                  disabled={busy}
+                  onClick={() => setSidebarCollapsed(current => !current)}
+                  title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
                 >
-                  Reset
-                </button>
-                <button
-                  className="secondary"
-                  type="button"
-                  onClick={() => perform(window.desktopApi.stopSession, { sessionId: activeSession.id })}
-                  disabled={busy}
-                >
-                  Stop
-                </button>
-                <button
-                  className="danger"
-                  type="button"
-                  onClick={() =>
-                    perform(window.desktopApi.removeSession, { sessionId: activeSession.id }, () => {
-                      setActiveSessionId("");
-                    })
-                  }
-                  disabled={busy}
-                >
-                  Remove
+                  {sidebarCollapsed ? ">" : "<"}
                 </button>
               </div>
-            </header>
+            </div>
 
-            <section className="terminal-stage">
-              <div className="terminal-toolbar">
-                <div className="terminal-toolbar-main">
-                  <span className="terminal-shell-dot" />
-                  <span className="terminal-shell-dot" />
-                  <span className="terminal-shell-dot" />
-                  <div className="terminal-label-group">
-                    <span className="terminal-shell-label">{runtimeLabel(activeSession.runtime)} session</span>
-                    <span className="terminal-shell-meta">{activeSession.containerName}</span>
+            {!sidebarCollapsed ? (
+              <>
+                <div className="workspace-card">
+                  <div className="workspace-copy">
+                    <span className="repo-label">Workspace</span>
+                    <span className="repo-name">{repoName}</span>
+                    <span className="repo-path">{settings.repoPath || "Choose the claude-code-docker repository"}</span>
                   </div>
+                  <button className="repo-button" type="button" onClick={chooseRepo}>
+                    Change
+                  </button>
                 </div>
 
-                <div className="terminal-toolbar-aside">
-                  {activeSession.branch ? <span className="terminal-chip">branch {activeSession.branch}</span> : null}
-                  {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
+                <div className="sidebar-meta">
+                  <span className="meta-pill">{sessions.length} total</span>
+                  <span className="meta-pill">{liveSessionCount} live</span>
                 </div>
+              </>
+            ) : (
+              <div className="sidebar-meta compact">
+                <button className="repo-button compact" type="button" onClick={chooseRepo} title="Change repository">
+                  Repo
+                </button>
+                <span className="meta-pill compact" title={`${sessions.length} sessions`}>
+                  {sessions.length}
+                </span>
               </div>
+            )}
+          </div>
+
+          <div className="session-list-panel">
+            {!sidebarCollapsed ? <div className="section-label">Recent sessions</div> : null}
+
+            <div className="session-list">
+              {sessions.length === 0 ? (
+                <div className={sidebarCollapsed ? "empty-sidebar compact" : "empty-sidebar"}>
+                  <p>No sessions yet.</p>
+                  {!sidebarCollapsed ? <p>Use the plus button to start one.</p> : null}
+                </div>
+              ) : null}
 
               {sessions.map(session => (
-                <SessionTerminal key={session.id} sessionId={session.id} active={session.id === activeSessionId} />
+                <button
+                  className={session.id === activeSessionId ? "session-item active" : "session-item"}
+                  key={session.id}
+                  title={sessionTitle(session)}
+                  type="button"
+                  onClick={() => selectSession(session.id)}
+                >
+                  <div className="session-item-main">
+                    <div className="session-avatar-wrap">
+                      <SessionAvatar session={session} />
+                      <SessionStateDot status={session.status} />
+                    </div>
+
+                    {!sidebarCollapsed ? (
+                      <div className="session-copy">
+                        <div className="session-title-line">
+                          <div className="session-title-block">
+                            <span className="session-title">{session.name}</span>
+                            <div className="session-meta-text">
+                              <span className={`session-runtime runtime-${session.runtime}`}>{runtimeLabel(session.runtime)}</span>
+                              {session.branch ? <span>branch {session.branch}</span> : null}
+                              {session.port ? <span>port {session.port}</span> : null}
+                            </div>
+                          </div>
+
+                          <div className="session-inline-status">
+                            <SessionSignal state={sessionSignals[session.id]} />
+                          </div>
+                        </div>
+
+                        <div className="session-subtle">{session.dockerStatus || "Waiting for container state"}</div>
+                      </div>
+                    ) : null}
+                  </div>
+                </button>
               ))}
-            </section>
-          </>
-        ) : (
-          <section className="empty-main">
-            <div className="empty-panel">
-              <div className="empty-mark" />
-              <div className="eyebrow">Autodex desktop</div>
-              <h2>Let&apos;s build.</h2>
-              <p>Open a session from the sidebar or start a new one.</p>
             </div>
-          </section>
-        )}
-      </main>
-    </div>
+          </div>
+        </aside>
+
+        <main className="main-pane">
+          {error ? <div className="error-banner">{error}</div> : null}
+          {activeSession ? (
+            <>
+              <header className="main-header">
+                <div className="main-heading">
+                  <div className="main-heading-top">
+                    <SessionAvatar session={activeSession} />
+                    <div className="main-heading-copy">
+                      <div className="eyebrow">Active session</div>
+                      <h2>{activeSession.name}</h2>
+                    </div>
+                  </div>
+
+                  <div className="header-status-row">
+                    <span className={`session-runtime runtime-${activeSession.runtime}`}>{runtimeLabel(activeSession.runtime)}</span>
+                    <span className="header-divider" />
+                    <StatusBadge session={activeSession} />
+                    <span className="header-divider" />
+                    <span>{activeSession.dockerStatus || "Ready"}</span>
+                    <span className="header-divider" />
+                    <span className="header-path">{settings.repoPath || "Repository not selected"}</span>
+                  </div>
+
+                  <SessionFacts session={activeSession} className="session-facts detail-facts" />
+                </div>
+
+                <div className="action-row">
+                  <button className="secondary" type="button" onClick={chooseRepo} disabled={busy}>
+                    Repo
+                  </button>
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => perform(window.desktopApi.attachSession, { sessionId: activeSession.id }, () => selectSession(activeSession.id))}
+                    disabled={busy}
+                  >
+                    Open
+                  </button>
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => perform(window.desktopApi.resetSession, { sessionId: activeSession.id }, () => selectSession(activeSession.id))}
+                    disabled={busy}
+                  >
+                    Reset
+                  </button>
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => perform(window.desktopApi.stopSession, { sessionId: activeSession.id })}
+                    disabled={busy}
+                  >
+                    Stop
+                  </button>
+                  <button
+                    className="danger"
+                    type="button"
+                    onClick={() =>
+                      perform(window.desktopApi.removeSession, { sessionId: activeSession.id }, () => {
+                        setActiveSessionId("");
+                      })
+                    }
+                    disabled={busy}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </header>
+
+              <section className="terminal-stage">
+                <div className="terminal-toolbar">
+                  <div className="terminal-toolbar-main">
+                    <span className="terminal-shell-dot" />
+                    <span className="terminal-shell-dot" />
+                    <span className="terminal-shell-dot" />
+                    <div className="terminal-label-group">
+                      <span className="terminal-shell-label">{runtimeLabel(activeSession.runtime)} session</span>
+                      <span className="terminal-shell-meta">{activeSession.containerName}</span>
+                    </div>
+                  </div>
+
+                  <div className="terminal-toolbar-aside">
+                    {activeSession.branch ? <span className="terminal-chip">branch {activeSession.branch}</span> : null}
+                    {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
+                  </div>
+                </div>
+
+                {sessions.map(session => (
+                  <SessionTerminal key={session.id} sessionId={session.id} active={session.id === activeSessionId} />
+                ))}
+              </section>
+            </>
+          ) : (
+            <section className="empty-main">
+              <div className="empty-panel">
+                <div className="empty-mark" />
+                <div className="eyebrow">Autodex desktop</div>
+                <h2>Let&apos;s build.</h2>
+                <p>Keep the terminal front and center. Spin up a fresh Claude or Codex session when you need it.</p>
+                <div className="empty-actions">
+                  <button className="primary" type="button" onClick={() => setShowComposer(true)}>
+                    Start session
+                  </button>
+                  <button className="secondary" type="button" onClick={chooseRepo}>
+                    Choose repo
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+        </main>
+      </div>
+
+      <SessionComposerOverlay
+        open={showComposer}
+        sessions={sessions}
+        disabled={busy}
+        onClose={() => setShowComposer(false)}
+        onCreate={handleCreate}
+      />
+    </>
   );
 }
