@@ -1,0 +1,558 @@
+const { app, BrowserWindow, dialog, ipcMain, Notification, nativeTheme } = require("electron");
+const fs = require("fs/promises");
+const path = require("path");
+const { execFile, spawn } = require("child_process");
+const pty = require("node-pty");
+
+const liveSessions = new Map();
+let mainWindow = null;
+let storePath = "";
+let appState = {
+  settings: {
+    repoPath: "",
+  },
+  sessions: [],
+};
+let refreshInterval = null;
+
+const DEFAULT_WINDOW = {
+  width: 1480,
+  height: 920,
+  minWidth: 980,
+  minHeight: 640,
+};
+
+function createDefaultState() {
+  return {
+    settings: {
+      repoPath: path.resolve(__dirname, "..", ".."),
+    },
+    sessions: [],
+  };
+}
+
+async function ensureStateLoaded() {
+  if (storePath) {
+    return;
+  }
+
+  storePath = path.join(app.getPath("userData"), "desktop-state.json");
+
+  try {
+    const raw = await fs.readFile(storePath, "utf8");
+    const parsed = JSON.parse(raw);
+    appState = {
+      ...createDefaultState(),
+      ...parsed,
+      settings: {
+        ...createDefaultState().settings,
+        ...(parsed.settings || {}),
+      },
+      sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+    };
+  } catch {
+    appState = createDefaultState();
+    await persistState();
+  }
+}
+
+async function persistState() {
+  if (!storePath) {
+    return;
+  }
+
+  await fs.mkdir(path.dirname(storePath), { recursive: true });
+  await fs.writeFile(storePath, JSON.stringify(appState, null, 2));
+}
+
+function currentRepoPath() {
+  return appState.settings.repoPath || path.resolve(__dirname, "..", "..");
+}
+
+function buildSessionId(runtime, name) {
+  return `${runtime}:${name}`;
+}
+
+function buildProjectName(runtime, name) {
+  return `${runtime === "claude" ? "claude" : "codex"}-${name}`;
+}
+
+function buildContainerName(runtime, name) {
+  return `${buildProjectName(runtime, name)}-claude-code-1`;
+}
+
+function shQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function dedupeSessions(sessions) {
+  const seen = new Set();
+  return sessions.filter(session => {
+    if (seen.has(session.id)) {
+      return false;
+    }
+    seen.add(session.id);
+    return true;
+  });
+}
+
+function sortedSessions(sessions) {
+  return [...sessions].sort((a, b) => {
+    const aActive = liveSessions.has(a.id) ? 0 : 1;
+    const bActive = liveSessions.has(b.id) ? 0 : 1;
+    if (aActive !== bActive) {
+      return aActive - bActive;
+    }
+    return (b.lastOpenedAt || b.createdAt || "").localeCompare(a.lastOpenedAt || a.createdAt || "");
+  });
+}
+
+function upsertSession(partial) {
+  const existingIndex = appState.sessions.findIndex(session => session.id === partial.id);
+  if (existingIndex >= 0) {
+    appState.sessions[existingIndex] = {
+      ...appState.sessions[existingIndex],
+      ...partial,
+    };
+  } else {
+    appState.sessions.push(partial);
+  }
+  appState.sessions = dedupeSessions(sortedSessions(appState.sessions));
+}
+
+function removeSessionById(sessionId) {
+  appState.sessions = appState.sessions.filter(session => session.id !== sessionId);
+}
+
+function getSessionById(sessionId) {
+  return appState.sessions.find(session => session.id === sessionId);
+}
+
+function emit(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  mainWindow.webContents.send(channel, payload);
+}
+
+async function runCommand(filePath, args = [], options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(filePath, args, options, (error, stdout, stderr) => {
+      if (error) {
+        reject({
+          error,
+          stdout,
+          stderr,
+        });
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+async function getDockerContainers() {
+  try {
+    const { stdout } = await runCommand("docker", [
+      "ps",
+      "-a",
+      "--format",
+      "{{.Names}}\t{{.State}}\t{{.Status}}",
+    ]);
+
+    return stdout
+      .split("\n")
+      .filter(Boolean)
+      .map(line => {
+        const [name, state, status] = line.split("\t");
+        return { name, state, status };
+      });
+  } catch {
+    return [];
+  }
+}
+
+async function refreshSessionsFromDocker() {
+  const dockerSessions = await getDockerContainers();
+  const enriched = [...appState.sessions];
+
+  dockerSessions.forEach(container => {
+    const claudePrefix = "claude-";
+    const codexPrefix = "codex-";
+    let runtime = null;
+    let name = null;
+
+    if (container.name.startsWith(claudePrefix) && container.name.endsWith("-claude-code-1")) {
+      runtime = "claude";
+      name = container.name.slice(claudePrefix.length, -"-claude-code-1".length);
+    } else if (container.name.startsWith(codexPrefix) && container.name.endsWith("-claude-code-1")) {
+      runtime = "codex";
+      name = container.name.slice(codexPrefix.length, -"-claude-code-1".length);
+    }
+
+    if (!runtime || !name) {
+      return;
+    }
+
+    const sessionId = buildSessionId(runtime, name);
+    const existing = enriched.find(session => session.id === sessionId);
+    const next = {
+      id: sessionId,
+      name,
+      runtime,
+      projectName: buildProjectName(runtime, name),
+      containerName: container.name,
+      status: liveSessions.has(sessionId) ? "attached" : container.state,
+      dockerStatus: container.status,
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      lastOpenedAt: existing?.lastOpenedAt || existing?.createdAt || new Date().toISOString(),
+      branch: existing?.branch || "",
+      port: existing?.port || "",
+    };
+
+    if (existing) {
+      Object.assign(existing, next);
+    } else {
+      enriched.push(next);
+    }
+  });
+
+  appState.sessions = dedupeSessions(sortedSessions(enriched));
+  await persistState();
+  emit("sessions:changed", appState.sessions);
+  return appState.sessions;
+}
+
+function sessionScripts(runtime) {
+  const repoPath = currentRepoPath();
+  return {
+    start: path.join(repoPath, runtime === "claude" ? "cc-start" : "codex-start"),
+    stop: path.join(repoPath, runtime === "claude" ? "cc-stop" : "codex-stop"),
+    remove: path.join(repoPath, runtime === "claude" ? "cc-rm" : "codex-rm"),
+    reset: path.join(repoPath, runtime === "claude" ? "cc-reset" : "codex-reset"),
+  };
+}
+
+function notifyIfHidden(title, body) {
+  if (!mainWindow || mainWindow.isFocused()) {
+    return;
+  }
+
+  try {
+    const notification = new Notification({ title, body });
+    notification.show();
+  } catch {
+    // Notifications can fail in some desktop environments. Ignore.
+  }
+}
+
+async function startInteractiveSession(session, mode = "start", size = { cols: 120, rows: 32 }) {
+  const existing = liveSessions.get(session.id);
+  if (existing) {
+    return session;
+  }
+
+  const scripts = sessionScripts(session.runtime);
+  const scriptPath = mode === "reset" ? scripts.reset : scripts.start;
+  const args = [scriptPath, session.name];
+
+  if (mode === "start" && session.branch) {
+    args.push("--branch", session.branch);
+  }
+
+  if (mode === "start" && session.runtime === "claude" && session.port) {
+    args.push("--port", String(session.port));
+  }
+
+  const repoPath = currentRepoPath();
+  const env = { ...process.env, ELECTRON_RUN_AS_NODE: undefined };
+  const shell = process.platform === "win32" ? "powershell.exe" : process.env.SHELL || "/bin/zsh";
+  const command = args.map(shQuote).join(" ");
+
+  const term = pty.spawn(shell, ["-lc", command], {
+    cwd: repoPath,
+    env,
+    cols: size.cols || 120,
+    rows: size.rows || 32,
+    name: "xterm-256color",
+  });
+
+  liveSessions.set(session.id, { term });
+
+  upsertSession({
+    ...session,
+    status: "attached",
+    dockerStatus: "Attaching...",
+    lastOpenedAt: new Date().toISOString(),
+  });
+  await persistState();
+  emit("sessions:changed", appState.sessions);
+
+  term.onData(data => {
+    emit("terminal:data", { sessionId: session.id, data });
+
+    if (!mainWindow?.isFocused()) {
+      notifyIfHidden(session.name, "Session received output.");
+    }
+  });
+
+  term.onExit(async ({ exitCode, signal }) => {
+    liveSessions.delete(session.id);
+    upsertSession({
+      ...getSessionById(session.id),
+      status: "detached",
+      dockerStatus: signal ? `PTY exited (${signal})` : `PTY exited (${exitCode})`,
+      lastExitCode: exitCode,
+    });
+    await refreshSessionsFromDocker();
+    emit("terminal:exit", { sessionId: session.id, exitCode, signal });
+    notifyIfHidden(session.name, `Session exited${typeof exitCode === "number" ? ` with code ${exitCode}` : ""}.`);
+  });
+
+  return getSessionById(session.id);
+}
+
+async function runDetachedScript(runtime, action, name) {
+  const scripts = sessionScripts(runtime);
+  const scriptPath = scripts[action];
+
+  if (!scriptPath) {
+    throw new Error(`Unknown action: ${action}`);
+  }
+
+  await new Promise((resolve, reject) => {
+    const child = spawn(scriptPath, [name], {
+      cwd: currentRepoPath(),
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stderr = "";
+
+    child.stderr.on("data", chunk => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", reject);
+    child.on("exit", code => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(stderr || `${action} exited with code ${code}`));
+      }
+    });
+  });
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    ...DEFAULT_WINDOW,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#101010" : "#ffffff",
+    titleBarStyle: "hiddenInset",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      spellcheck: false,
+    },
+  });
+
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devUrl) {
+    mainWindow.loadURL(devUrl);
+  } else {
+    mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+  }
+}
+
+function validateRepoPath(repoPath) {
+  const requiredScripts = ["cc-start", "codex-start", "cc-stop", "codex-stop"];
+  return Promise.all(requiredScripts.map(script => fs.access(path.join(repoPath, script))))
+    .then(() => true)
+    .catch(() => false);
+}
+
+app.whenReady().then(async () => {
+  await ensureStateLoaded();
+  createWindow();
+  await refreshSessionsFromDocker();
+
+  refreshInterval = setInterval(() => {
+    refreshSessionsFromDocker().catch(() => {});
+  }, 5000);
+});
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+
+app.on("before-quit", () => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+  }
+
+  liveSessions.forEach(({ term }) => {
+    try {
+      term.kill();
+    } catch {
+      // Ignore shutdown race.
+    }
+  });
+});
+
+ipcMain.handle("settings:get", async () => {
+  await ensureStateLoaded();
+  return appState.settings;
+});
+
+ipcMain.handle("settings:choose-repo-path", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openDirectory"],
+    title: "Choose claude-code-docker repository",
+  });
+
+  if (result.canceled || !result.filePaths[0]) {
+    return null;
+  }
+
+  const repoPath = result.filePaths[0];
+  const valid = await validateRepoPath(repoPath);
+  if (!valid) {
+    throw new Error("Selected folder does not look like claude-code-docker.");
+  }
+
+  appState.settings.repoPath = repoPath;
+  await persistState();
+  await refreshSessionsFromDocker();
+  return appState.settings;
+});
+
+ipcMain.handle("sessions:list", async () => {
+  await ensureStateLoaded();
+  return refreshSessionsFromDocker();
+});
+
+ipcMain.handle("sessions:create", async (_event, payload) => {
+  await ensureStateLoaded();
+  const name = String(payload.name || "").trim();
+  const runtime = payload.runtime === "codex" ? "codex" : "claude";
+  const branch = String(payload.branch || "").trim();
+  const port = String(payload.port || "").trim();
+
+  if (!name) {
+    throw new Error("Session name is required.");
+  }
+
+  const session = {
+    id: buildSessionId(runtime, name),
+    name,
+    runtime,
+    branch,
+    port,
+    projectName: buildProjectName(runtime, name),
+    containerName: buildContainerName(runtime, name),
+    status: "starting",
+    dockerStatus: "Starting...",
+    createdAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+  };
+
+  upsertSession(session);
+  await persistState();
+  await startInteractiveSession(session, "start", payload.size || undefined);
+  return getSessionById(session.id);
+});
+
+ipcMain.handle("sessions:attach", async (_event, payload) => {
+  const session = getSessionById(payload.sessionId);
+  if (!session) {
+    throw new Error("Session not found.");
+  }
+  await startInteractiveSession(session, "start", payload.size || undefined);
+  await refreshSessionsFromDocker();
+  return getSessionById(session.id);
+});
+
+ipcMain.handle("sessions:reset", async (_event, payload) => {
+  const session = getSessionById(payload.sessionId);
+  if (!session) {
+    throw new Error("Session not found.");
+  }
+
+  const live = liveSessions.get(session.id);
+  if (live) {
+    try {
+      live.term.kill();
+    } catch {
+      // Ignore.
+    }
+    liveSessions.delete(session.id);
+  }
+
+  await startInteractiveSession(session, "reset", payload.size || undefined);
+  return getSessionById(session.id);
+});
+
+ipcMain.handle("sessions:input", async (_event, payload) => {
+  const live = liveSessions.get(payload.sessionId);
+  if (!live) {
+    return false;
+  }
+  live.term.write(payload.data);
+  return true;
+});
+
+ipcMain.handle("sessions:resize", async (_event, payload) => {
+  const live = liveSessions.get(payload.sessionId);
+  if (!live) {
+    return false;
+  }
+  live.term.resize(Math.max(40, payload.cols || 120), Math.max(12, payload.rows || 32));
+  return true;
+});
+
+ipcMain.handle("sessions:stop", async (_event, payload) => {
+  const session = getSessionById(payload.sessionId);
+  if (!session) {
+    throw new Error("Session not found.");
+  }
+
+  const live = liveSessions.get(session.id);
+  if (live) {
+    try {
+      live.term.kill();
+    } catch {
+      // Ignore.
+    }
+    liveSessions.delete(session.id);
+  }
+
+  await runDetachedScript(session.runtime, "stop", session.name);
+  await refreshSessionsFromDocker();
+  return getSessionById(session.id);
+});
+
+ipcMain.handle("sessions:remove", async (_event, payload) => {
+  const session = getSessionById(payload.sessionId);
+  if (!session) {
+    throw new Error("Session not found.");
+  }
+
+  const live = liveSessions.get(session.id);
+  if (live) {
+    try {
+      live.term.kill();
+    } catch {
+      // Ignore.
+    }
+    liveSessions.delete(session.id);
+  }
+
+  await runDetachedScript(session.runtime, "remove", session.name);
+  removeSessionById(session.id);
+  await persistState();
+  await refreshSessionsFromDocker();
+  return true;
+});

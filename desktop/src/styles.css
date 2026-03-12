@@ -1,0 +1,290 @@
+:root {
+  color-scheme: dark;
+  font-family: "SF Pro Text", "Segoe UI", sans-serif;
+  background: #0d0d0d;
+  color: #ededeb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: #0d0d0d;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+}
+
+input {
+  width: 100%;
+  background: #161616;
+  color: #f5f5f4;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+input:focus {
+  outline: none;
+  border-color: #4b4b4b;
+}
+
+.boot-screen,
+.empty-main {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: #b1b1ad;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.05), transparent 32%),
+    linear-gradient(180deg, #111111 0%, #0b0b0b 100%);
+}
+
+.sidebar {
+  border-right: 1px solid #202020;
+  padding: 18px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: rgba(18, 18, 18, 0.95);
+}
+
+.sidebar-header,
+.main-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sidebar-header h1,
+.main-header h2 {
+  margin: 4px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.eyebrow {
+  color: #8f8f89;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.icon-button,
+.secondary,
+.danger,
+.primary,
+.toggle,
+.repo-button {
+  background: #171717;
+  color: #f3f3f1;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.icon-button {
+  min-width: 38px;
+  padding: 8px 12px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.primary {
+  background: #f3f3f1;
+  color: #111111;
+}
+
+.danger {
+  color: #f8b4b4;
+}
+
+.toggle.active {
+  background: #272727;
+}
+
+.repo-button {
+  text-align: left;
+  color: #bfbfba;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-session-form {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #242424;
+  border-radius: 14px;
+  background: #111111;
+}
+
+.field-row,
+.action-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.session-list {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-item {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  padding: 12px;
+  border-radius: 14px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: inherit;
+}
+
+.session-item:hover {
+  background: #141414;
+  border-color: #222222;
+}
+
+.session-item.active {
+  background: #181818;
+  border-color: #313131;
+}
+
+.session-title-row,
+.session-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.session-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.session-subtle,
+.terminal-subtitle {
+  color: #8e8e89;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.status-badge,
+.unread-pill {
+  border-radius: 999px;
+  font-size: 11px;
+  padding: 4px 8px;
+  background: #202020;
+  color: #bebeb8;
+}
+
+.status-attached {
+  color: #9fe3a8;
+}
+
+.status-running {
+  color: #9fe3a8;
+}
+
+.status-exited,
+.status-stopped,
+.status-detached {
+  color: #e5c387;
+}
+
+.main-pane {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+}
+
+.main-header {
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #202020;
+}
+
+.terminal-frame {
+  position: relative;
+  padding: 20px 24px 24px;
+  min-height: 0;
+}
+
+.terminal-host {
+  position: absolute;
+  inset: 20px 24px 24px;
+  border-radius: 18px;
+  border: 1px solid #252525;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+    #101010;
+  overflow: hidden;
+}
+
+.terminal-host.hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.terminal-host.active {
+  visibility: visible;
+}
+
+.terminal-host .xterm {
+  height: 100%;
+  padding: 16px;
+}
+
+.empty-panel,
+.empty-sidebar,
+.error-banner {
+  border-radius: 16px;
+  border: 1px solid #262626;
+  background: #111111;
+}
+
+.empty-panel {
+  padding: 28px;
+  max-width: 540px;
+}
+
+.empty-sidebar {
+  padding: 16px;
+  color: #9e9e98;
+}
+
+.error-banner {
+  margin: 16px 24px 0;
+  padding: 12px 14px;
+  color: #f3bbbb;
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    grid-template-columns: 280px 1fr;
+  }
+}
