@@ -254,7 +254,16 @@ async function refreshSessionsFromDocker() {
     }
   });
 
-  appState.sessions = dedupeSessions(sortedSessions(enriched));
+  // Remove sessions whose Docker containers no longer exist (unless still starting)
+  const dockerContainerNames = new Set(dockerSessions.map(c => c.name));
+  const alive = enriched.filter(session => {
+    if (session.status === "starting") return true;
+    if (liveSessions.has(session.id)) return true;
+    if (session.containerName && dockerContainerNames.has(session.containerName)) return true;
+    return false;
+  });
+
+  appState.sessions = dedupeSessions(sortedSessions(alive));
   await persistState();
   emit("sessions:changed", appState.sessions);
   return appState.sessions;
