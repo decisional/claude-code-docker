@@ -36,6 +36,13 @@ function SessionTerminal({ sessionId, active }) {
   const containerRef = useRef(null);
   const terminalRef = useRef(null);
   const fitRef = useRef(null);
+  const activeRef = useRef(active);
+  const resizeTimerRef = useRef(null);
+  const lastResizeRef = useRef({ cols: 0, rows: 0 });
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -69,29 +76,15 @@ function SessionTerminal({ sessionId, active }) {
       }
     });
 
-    const resize = () => {
-      try {
-        fit.fit();
-        window.desktopApi.resizeSession({
-          sessionId,
-          cols: terminal.cols,
-          rows: terminal.rows,
-        });
-      } catch {
-        // Ignore during teardown.
-      }
-    };
-
-    const observer = new ResizeObserver(resize);
-    observer.observe(containerRef.current);
-    setTimeout(resize, 50);
-
     terminal.onData(data => {
       window.desktopApi.sendInput({ sessionId, data });
     });
 
     return () => {
-      observer.disconnect();
+      if (resizeTimerRef.current) {
+        clearTimeout(resizeTimerRef.current);
+        resizeTimerRef.current = null;
+      }
       onData();
       terminal.dispose();
       terminalRef.current = null;
@@ -104,21 +97,71 @@ function SessionTerminal({ sessionId, active }) {
       return;
     }
 
-    setTimeout(() => {
-      if (fitRef.current && terminalRef.current) {
-        try {
-          fitRef.current.fit();
-          terminalRef.current.focus();
-          window.desktopApi.resizeSession({
-            sessionId,
-            cols: terminalRef.current.cols,
-            rows: terminalRef.current.rows,
-          });
-        } catch {
-          // Ignore.
-        }
+    const resize = () => {
+      if (!activeRef.current || !containerRef.current || !fitRef.current || !terminalRef.current) {
+        return;
       }
-    }, 25);
+
+      const { clientWidth, clientHeight } = containerRef.current;
+      if (clientWidth < 120 || clientHeight < 120) {
+        return;
+      }
+
+      try {
+        fitRef.current.fit();
+
+        const nextSize = {
+          cols: terminalRef.current.cols,
+          rows: terminalRef.current.rows,
+        };
+
+        if (nextSize.cols <= 0 || nextSize.rows <= 0) {
+          return;
+        }
+
+        if (lastResizeRef.current.cols === nextSize.cols && lastResizeRef.current.rows === nextSize.rows) {
+          return;
+        }
+
+        lastResizeRef.current = nextSize;
+        window.desktopApi.resizeSession({
+          sessionId,
+          cols: nextSize.cols,
+          rows: nextSize.rows,
+        });
+      } catch {
+        // Ignore during teardown.
+      }
+    };
+
+    const scheduleResize = delay => {
+      if (resizeTimerRef.current) {
+        clearTimeout(resizeTimerRef.current);
+      }
+
+      resizeTimerRef.current = setTimeout(() => {
+        resizeTimerRef.current = null;
+        resize();
+        if (terminalRef.current) {
+          terminalRef.current.focus();
+        }
+      }, delay);
+    };
+
+    const observer = new ResizeObserver(() => {
+      scheduleResize(80);
+    });
+
+    observer.observe(containerRef.current);
+    scheduleResize(40);
+
+    return () => {
+      observer.disconnect();
+      if (resizeTimerRef.current) {
+        clearTimeout(resizeTimerRef.current);
+        resizeTimerRef.current = null;
+      }
+    };
   }, [active, sessionId]);
 
   return <div className={`terminal-host ${active ? "active" : "hidden"}`} ref={containerRef} />;
