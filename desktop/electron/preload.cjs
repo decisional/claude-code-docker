@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   removeSession: payload => ipcRenderer.invoke("sessions:remove", payload),
   sendInput: payload => ipcRenderer.invoke("sessions:input", payload),
   resizeSession: payload => ipcRenderer.invoke("sessions:resize", payload),
+  readClipboardFilePaths: () => ipcRenderer.invoke("clipboard:read-file-paths"),
   onTerminalData: handler => {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on("terminal:data", listener);

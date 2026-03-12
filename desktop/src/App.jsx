@@ -80,11 +80,41 @@ function SessionTerminal({ sessionId, active }) {
       window.desktopApi.sendInput({ sessionId, data });
     });
 
+    const handlePaste = async event => {
+      const text = event.clipboardData?.getData("text/plain");
+      if (text) {
+        return; // xterm handles normal text paste
+      }
+
+      const hasFiles = event.clipboardData?.files?.length > 0 || event.clipboardData?.types?.includes("Files");
+      if (!hasFiles) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      try {
+        const paths = await window.desktopApi.readClipboardFilePaths();
+        if (paths && paths.length > 0) {
+          const escaped = paths.map(p => (p.includes(" ") ? `'${p}'` : p));
+          window.desktopApi.sendInput({ sessionId, data: escaped.join(" ") });
+        }
+      } catch {
+        // Clipboard read failed, ignore.
+      }
+    };
+
+    containerRef.current.addEventListener("paste", handlePaste);
+
+    const pasteTarget = containerRef.current;
+
     return () => {
       if (resizeTimerRef.current) {
         clearTimeout(resizeTimerRef.current);
         resizeTimerRef.current = null;
       }
+      pasteTarget.removeEventListener("paste", handlePaste);
       onData();
       terminal.dispose();
       terminalRef.current = null;

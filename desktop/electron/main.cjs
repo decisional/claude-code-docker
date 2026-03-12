@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Notification, nativeTheme } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, nativeTheme } = require("electron");
 const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
@@ -594,6 +594,34 @@ ipcMain.handle("sessions:resize", async (_event, payload) => {
   }
   live.term.resize(Math.max(40, payload.cols || 120), Math.max(12, payload.rows || 32));
   return true;
+});
+
+ipcMain.handle("clipboard:read-file-paths", async () => {
+  const formats = clipboard.availableFormats();
+
+  // macOS: files copied from Finder
+  if (formats.includes("NSFilenamesPboardType")) {
+    const raw = clipboard.read("NSFilenamesPboardType");
+    const paths = [...raw.matchAll(/<string>(.*?)<\/string>/g)].map(m => m[1]);
+    if (paths.length > 0) {
+      return paths;
+    }
+  }
+
+  // Linux: files copied from file managers
+  if (formats.includes("text/uri-list")) {
+    const uriList = clipboard.read("text/uri-list");
+    const paths = uriList
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line.startsWith("file://"))
+      .map(uri => decodeURIComponent(new URL(uri).pathname));
+    if (paths.length > 0) {
+      return paths;
+    }
+  }
+
+  return null;
 });
 
 ipcMain.handle("sessions:stop", async (_event, payload) => {
