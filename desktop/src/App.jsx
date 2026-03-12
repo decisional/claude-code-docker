@@ -101,6 +101,38 @@ function StatusBadge({ session }) {
   return <span className={`status-badge status-${status}`}>{status}</span>;
 }
 
+function SessionFacts({ session, className = "session-facts" }) {
+  const facts = [session.containerName, session.branch ? `branch ${session.branch}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
+
+  return (
+    <div className={className}>
+      {facts.map(fact => (
+        <span className="session-fact" key={fact}>
+          {fact}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function SessionSignal({ state }) {
+  if (state === "running") {
+    return (
+      <span className="session-signal running" title="Background session is active">
+        <span className="signal-dot" />
+        <span className="signal-dot" />
+        <span className="signal-dot" />
+      </span>
+    );
+  }
+
+  if (state === "attention") {
+    return <span className="session-signal attention">Requires attention</span>;
+  }
+
+  return null;
+}
+
 function NewSessionForm({ onCreate, disabled }) {
   const [runtime, setRuntime] = useState("claude");
   const [name, setName] = useState("");
@@ -161,8 +193,9 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showComposer, setShowComposer] = useState(false);
-  const [unread, setUnread] = useState({});
+  const [sessionSignals, setSessionSignals] = useState({});
   const activeSessionIdRef = useRef("");
+  const sessionSignalTimersRef = useRef({});
 
   const activeSession = useMemo(
     () => sessions.find(session => session.id === activeSessionId),
@@ -175,6 +208,14 @@ export default function App() {
 
   useEffect(() => {
     let ignore = false;
+
+    const clearSignalTimer = sessionId => {
+      const timer = sessionSignalTimersRef.current[sessionId];
+      if (timer) {
+        clearTimeout(timer);
+        delete sessionSignalTimersRef.current[sessionId];
+      }
+    };
 
     const bootstrap = async () => {
       try {
@@ -202,6 +243,17 @@ export default function App() {
 
     const offSessions = window.desktopApi.onSessionsChanged(nextSessions => {
       setSessions(nextSessions);
+      setSessionSignals(current => {
+        const validSessionIds = new Set(nextSessions.map(session => session.id));
+
+        Object.keys(sessionSignalTimersRef.current).forEach(sessionId => {
+          if (!validSessionIds.has(sessionId)) {
+            clearSignalTimer(sessionId);
+          }
+        });
+
+        return Object.fromEntries(Object.entries(current).filter(([sessionId]) => validSessionIds.has(sessionId)));
+      });
       const currentActive = activeSessionIdRef.current;
       const stillExists = nextSessions.some(session => session.id === currentActive);
       if (!stillExists) {
@@ -212,20 +264,47 @@ export default function App() {
     });
     const offTerminal = window.desktopApi.onTerminalData(({ sessionId }) => {
       if (sessionId !== activeSessionIdRef.current) {
-        setUnread(current => ({ ...current, [sessionId]: (current[sessionId] || 0) + 1 }));
+        clearSignalTimer(sessionId);
+        setSessionSignals(current => ({ ...current, [sessionId]: "running" }));
+        sessionSignalTimersRef.current[sessionId] = setTimeout(() => {
+          setSessionSignals(current => ({ ...current, [sessionId]: "attention" }));
+          delete sessionSignalTimersRef.current[sessionId];
+        }, 1800);
+      }
+    });
+    const offExit = window.desktopApi.onTerminalExit(({ sessionId }) => {
+      if (sessionId !== activeSessionIdRef.current) {
+        clearSignalTimer(sessionId);
+        setSessionSignals(current => ({ ...current, [sessionId]: "attention" }));
       }
     });
 
     return () => {
       ignore = true;
+      Object.values(sessionSignalTimersRef.current).forEach(clearTimeout);
+      sessionSignalTimersRef.current = {};
       offSessions();
       offTerminal();
+      offExit();
     };
   }, []);
 
   const selectSession = sessionId => {
     setActiveSessionId(sessionId);
-    setUnread(current => ({ ...current, [sessionId]: 0 }));
+    const timer = sessionSignalTimersRef.current[sessionId];
+    if (timer) {
+      clearTimeout(timer);
+      delete sessionSignalTimersRef.current[sessionId];
+    }
+    setSessionSignals(current => {
+      if (!current[sessionId]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
   };
 
   const handleCreate = async payload => {
@@ -289,38 +368,48 @@ export default function App() {
           </button>
         </div>
 
-        <button className="repo-button" type="button" onClick={chooseRepo}>
-          {settings.repoPath || "Choose repository"}
-        </button>
+        <div className="sidebar-tools">
+          <button className="repo-button" type="button" onClick={chooseRepo}>
+            <span className="repo-label">Repository</span>
+            <span className="repo-path">{settings.repoPath || "Choose repository"}</span>
+          </button>
 
-        {showComposer ? <NewSessionForm onCreate={handleCreate} disabled={busy} /> : null}
+          {showComposer ? <NewSessionForm onCreate={handleCreate} disabled={busy} /> : null}
+        </div>
 
-        <div className="session-list">
-          {sessions.length === 0 ? (
-            <div className="empty-sidebar">
-              <p>No sessions yet.</p>
-              <p>Start one with Claude or Codex.</p>
-            </div>
-          ) : null}
+        <div className="session-list-panel">
+          <div className="section-label">All sessions</div>
 
-          {sessions.map(session => (
-            <button
-              className={session.id === activeSessionId ? "session-item active" : "session-item"}
-              key={session.id}
-              type="button"
-              onClick={() => selectSession(session.id)}
-            >
-              <div className="session-title-row">
-                <span className="session-title">{session.name}</span>
-                {unread[session.id] ? <span className="unread-pill">{unread[session.id]}</span> : null}
+          <div className="session-list">
+            {sessions.length === 0 ? (
+              <div className="empty-sidebar">
+                <p>No sessions yet.</p>
+                <p>Start one with Claude or Codex.</p>
               </div>
-              <div className="session-meta">
-                <span>{session.runtime}</span>
-                <StatusBadge session={session} />
-              </div>
-              <div className="session-subtle">{session.dockerStatus || session.containerName}</div>
-            </button>
-          ))}
+            ) : null}
+
+            {sessions.map(session => (
+              <button
+                className={session.id === activeSessionId ? "session-item active" : "session-item"}
+                key={session.id}
+                type="button"
+                onClick={() => selectSession(session.id)}
+              >
+                <div className="session-title-row">
+                  <div className="session-title-stack">
+                    <span className="session-title">{session.name}</span>
+                    <span className="session-runtime">{session.runtime}</span>
+                  </div>
+                  <div className="session-title-actions">
+                    <SessionSignal state={sessionSignals[session.id]} />
+                    <StatusBadge session={session} />
+                  </div>
+                </div>
+                <div className="session-subtle">{session.dockerStatus || "Waiting for container state"}</div>
+                <SessionFacts session={session} className="session-facts compact" />
+              </button>
+            ))}
+          </div>
         </div>
       </aside>
 
@@ -332,11 +421,8 @@ export default function App() {
               <div>
                 <div className="eyebrow">{activeSession.runtime}</div>
                 <h2>{activeSession.name}</h2>
-                <div className="terminal-subtitle">
-                  {activeSession.containerName}
-                  {activeSession.branch ? ` • branch ${activeSession.branch}` : ""}
-                  {activeSession.port ? ` • port ${activeSession.port}` : ""}
-                </div>
+                <div className="terminal-subtitle">{activeSession.dockerStatus || "Ready"}</div>
+                <SessionFacts session={activeSession} className="session-facts" />
               </div>
               <div className="action-row">
                 <button
@@ -379,6 +465,12 @@ export default function App() {
             </header>
 
             <section className="terminal-frame">
+              <div className="terminal-shell-bar">
+                <span className="terminal-shell-dot" />
+                <span className="terminal-shell-dot" />
+                <span className="terminal-shell-dot" />
+                <span className="terminal-shell-label">{activeSession.runtime === "codex" ? "Codex session" : "Claude session"}</span>
+              </div>
               {sessions.map(session => (
                 <SessionTerminal key={session.id} sessionId={session.id} active={session.id === activeSessionId} />
               ))}
