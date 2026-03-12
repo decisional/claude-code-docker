@@ -129,6 +129,10 @@ function StatusBadge({ session }) {
   return <span className={`status-badge status-${status}`}>{statusLabel(status)}</span>;
 }
 
+function SessionStateDot({ status }) {
+  return <span className={`session-state-dot status-${status || "unknown"}`} title={statusLabel(status)} />;
+}
+
 function SessionFacts({ session, className = "session-facts" }) {
   const facts = [session.containerName, session.branch ? `branch ${session.branch}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
 
@@ -415,6 +419,7 @@ export default function App() {
             <div className="workspace-copy">
               <span className="repo-label">Workspace</span>
               <span className="repo-name">{repoName}</span>
+              <span className="repo-path">{settings.repoPath || "Choose the claude-code-docker repository"}</span>
             </div>
             <button className="repo-button" type="button" onClick={chooseRepo}>
               Change
@@ -452,16 +457,19 @@ export default function App() {
                     <div className="session-title-line">
                       <div className="session-title-block">
                         <span className="session-title">{session.name}</span>
-                        <span className={`session-runtime runtime-${session.runtime}`}>{runtimeLabel(session.runtime)}</span>
+                        <div className="session-meta-text">
+                          <span className={`session-runtime runtime-${session.runtime}`}>{runtimeLabel(session.runtime)}</span>
+                          {session.branch ? <span>branch {session.branch}</span> : null}
+                          {session.port ? <span>port {session.port}</span> : null}
+                        </div>
                       </div>
-                      <div className="session-inline-badges">
+                      <div className="session-inline-status">
                         <SessionSignal state={sessionSignals[session.id]} />
-                        <StatusBadge session={session} />
+                        <SessionStateDot status={session.status} />
                       </div>
                     </div>
 
                     <div className="session-subtle">{session.dockerStatus || "Waiting for container state"}</div>
-                    <SessionFacts session={session} className="session-facts compact" />
                   </div>
                 </div>
               </button>
@@ -476,12 +484,13 @@ export default function App() {
           <>
             <header className="main-header">
               <div className="main-heading">
-                <div className="header-chip-row">
-                  <span className={`runtime-chip runtime-${activeSession.runtime}`}>{runtimeLabel(activeSession.runtime)}</span>
-                  <StatusBadge session={activeSession} />
-                </div>
+                <div className="eyebrow">Active session</div>
                 <h2>{activeSession.name}</h2>
                 <div className="header-status-row">
+                  <span className={`session-runtime runtime-${activeSession.runtime}`}>{runtimeLabel(activeSession.runtime)}</span>
+                  <span className="header-divider" />
+                  <StatusBadge session={activeSession} />
+                  <span className="header-divider" />
                   <span>{activeSession.dockerStatus || "Ready"}</span>
                   <span className="header-divider" />
                   <span className="header-path">{settings.repoPath || "Repository not selected"}</span>
@@ -555,10 +564,10 @@ export default function App() {
         ) : (
           <section className="empty-main">
             <div className="empty-panel">
-              <div className="empty-mark">A</div>
+              <div className="empty-mark" />
               <div className="eyebrow">Autodex desktop</div>
-              <h2>Manage Claude and Codex sessions in one place.</h2>
-              <p>Select a session from the sidebar or start a new one.</p>
+              <h2>Let&apos;s build.</h2>
+              <p>Open a session from the sidebar or start a new one.</p>
             </div>
           </section>
         )}
