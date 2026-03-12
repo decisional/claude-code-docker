@@ -86,13 +86,7 @@ function SessionTerminal({ sessionId, active }) {
         return; // xterm handles normal text paste
       }
 
-      const hasFiles = event.clipboardData?.files?.length > 0 || event.clipboardData?.types?.includes("Files");
-      if (!hasFiles) {
-        return;
-      }
-
       event.preventDefault();
-      event.stopPropagation();
 
       try {
         const paths = await window.desktopApi.readClipboardFilePaths();
@@ -105,9 +99,11 @@ function SessionTerminal({ sessionId, active }) {
       }
     };
 
-    containerRef.current.addEventListener("paste", handlePaste);
-
-    const pasteTarget = containerRef.current;
+    // Attach to xterm's internal textarea where paste events actually fire
+    const pasteTarget = terminal.textarea;
+    if (pasteTarget) {
+      pasteTarget.addEventListener("paste", handlePaste);
+    }
 
     return () => {
       if (resizeTimerRef.current) {
