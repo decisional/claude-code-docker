@@ -2,6 +2,7 @@ const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, nativeThem
 const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
+const { fileURLToPath } = require("url");
 const { execFile, spawn } = require("child_process");
 const pty = require("node-pty");
 
@@ -113,6 +114,27 @@ function sortedSessions(sessions) {
     }
     return (b.lastOpenedAt || b.createdAt || "").localeCompare(a.lastOpenedAt || a.createdAt || "");
   });
+}
+
+function parseFileUrls(rawValue) {
+  const text = `${rawValue || ""}`;
+  return text
+    .split(/[\r\n\0]+/)
+    .map(entry => entry.trim())
+    .filter(entry => entry.startsWith("file://"))
+    .map(entry => {
+      try {
+        return fileURLToPath(entry);
+      } catch {
+        return "";
+      }
+    })
+    .filter(Boolean);
+}
+
+function parseFinderFileList(rawValue) {
+  const text = `${rawValue || ""}`;
+  return [...text.matchAll(/<string>(.*?)<\/string>/g)].map(([, entry]) => entry).filter(Boolean);
 }
 
 function upsertSession(partial) {
@@ -596,32 +618,28 @@ ipcMain.handle("sessions:resize", async (_event, payload) => {
   return true;
 });
 
+ipcMain.handle("clipboard:read-text", async () => clipboard.readText());
+
 ipcMain.handle("clipboard:read-file-paths", async () => {
   const formats = clipboard.availableFormats();
+  const paths = [];
 
   // macOS: files copied from Finder
   if (formats.includes("NSFilenamesPboardType")) {
-    const raw = clipboard.read("NSFilenamesPboardType");
-    const paths = [...raw.matchAll(/<string>(.*?)<\/string>/g)].map(m => m[1]);
-    if (paths.length > 0) {
-      return paths;
-    }
+    paths.push(...parseFinderFileList(clipboard.read("NSFilenamesPboardType")));
+    paths.push(...parseFinderFileList(clipboard.readBuffer("NSFilenamesPboardType").toString("utf8")));
   }
 
-  // Linux: files copied from file managers
-  if (formats.includes("text/uri-list")) {
-    const uriList = clipboard.read("text/uri-list");
-    const paths = uriList
-      .split("\n")
-      .map(line => line.trim())
-      .filter(line => line.startsWith("file://"))
-      .map(uri => decodeURIComponent(new URL(uri).pathname));
-    if (paths.length > 0) {
-      return paths;
+  for (const format of ["public.file-url", "public.url", "text/uri-list"]) {
+    if (!formats.includes(format)) {
+      continue;
     }
+
+    paths.push(...parseFileUrls(clipboard.read(format)));
+    paths.push(...parseFileUrls(clipboard.readBuffer(format).toString("utf8")));
   }
 
-  return null;
+  return [...new Set(paths)].filter(Boolean);
 });
 
 ipcMain.handle("sessions:stop", async (_event, payload) => {
