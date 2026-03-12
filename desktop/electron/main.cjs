@@ -81,10 +81,6 @@ function buildContainerName(runtime, name) {
   return `${buildProjectName(runtime, name)}-claude-code-1`;
 }
 
-function shQuote(value) {
-  return `'${String(value).replace(/'/g, `'\\''`)}'`;
-}
-
 function dedupeSessions(sessions) {
   const seen = new Set();
   return sessions.filter(session => {
@@ -265,17 +261,33 @@ async function startInteractiveSession(session, mode = "start", size = { cols: 1
   }
 
   const repoPath = currentRepoPath();
-  const env = { ...process.env, ELECTRON_RUN_AS_NODE: undefined };
-  const shell = process.platform === "win32" ? "powershell.exe" : process.env.SHELL || "/bin/zsh";
-  const command = args.map(shQuote).join(" ");
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([, value]) => value !== undefined && value !== null)
+  );
 
-  const term = pty.spawn(shell, ["-lc", command], {
-    cwd: repoPath,
-    env,
-    cols: size.cols || 120,
-    rows: size.rows || 32,
-    name: "xterm-256color",
-  });
+  let term;
+  try {
+    // Run the repo bash scripts directly rather than wrapping them in an extra
+    // shell command string. This avoids macOS posix_spawn issues caused by
+    // shell indirection and quoting.
+    term = pty.spawn("/bin/bash", args, {
+      cwd: repoPath,
+      env,
+      cols: size.cols || 120,
+      rows: size.rows || 32,
+      name: "xterm-256color",
+    });
+  } catch (error) {
+    upsertSession({
+      ...session,
+      status: "error",
+      dockerStatus: error?.message || "Failed to launch session.",
+      lastOpenedAt: new Date().toISOString(),
+    });
+    await persistState();
+    emit("sessions:changed", appState.sessions);
+    throw error;
+  }
 
   liveSessions.set(session.id, { term });
 
@@ -300,7 +312,7 @@ async function startInteractiveSession(session, mode = "start", size = { cols: 1
     liveSessions.delete(session.id);
     upsertSession({
       ...getSessionById(session.id),
-      status: "detached",
+      status: exitCode === 0 ? "detached" : "error",
       dockerStatus: signal ? `PTY exited (${signal})` : `PTY exited (${exitCode})`,
       lastExitCode: exitCode,
     });
