@@ -7,6 +7,7 @@ const EMPTY_SESSIONS = [];
 // Registry so parent can focus a terminal by session ID
 const terminalRegistry = new Map();
 const SIDEBAR_STORAGE_KEY = "autodex-desktop:sidebar-collapsed";
+const REVIEW_PANEL_STORAGE_KEY = "autodex-desktop:review-panel-open";
 const SIDEBAR_SHORTCUT_KEY = "b";
 
 const STATUS_LABELS = {
@@ -372,6 +373,267 @@ function SessionFacts({ session, className = "session-facts" }) {
   );
 }
 
+function parseDiff(rawDiff) {
+  if (!rawDiff || !rawDiff.trim()) return [];
+  const lines = rawDiff.split("\n");
+  const hunks = [];
+  let currentHunk = null;
+
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/);
+      currentHunk = {
+        header: line,
+        context: match ? match[3].trim() : "",
+        oldStart: match ? parseInt(match[1], 10) : 0,
+        newStart: match ? parseInt(match[2], 10) : 0,
+        lines: [],
+      };
+      hunks.push(currentHunk);
+      continue;
+    }
+
+    if (!currentHunk) continue;
+
+    if (line.startsWith("+")) {
+      currentHunk.lines.push({ type: "add", content: line.slice(1) });
+    } else if (line.startsWith("-")) {
+      currentHunk.lines.push({ type: "del", content: line.slice(1) });
+    } else if (line.startsWith(" ") || line === "") {
+      currentHunk.lines.push({ type: "ctx", content: line.slice(1) || "" });
+    }
+  }
+
+  return hunks;
+}
+
+function fileIcon(filePath) {
+  const ext = filePath.split(".").pop();
+  const dirPart = filePath.includes("/");
+  if (["ts", "tsx", "js", "jsx"].includes(ext)) return "code";
+  if (["css", "scss", "less"].includes(ext)) return "style";
+  if (["json", "yaml", "yml", "toml"].includes(ext)) return "config";
+  if (["md", "txt", "rst"].includes(ext)) return "doc";
+  if (ext === "lock") return "lock";
+  return dirPart ? "file" : "file";
+}
+
+function fileName(filePath) {
+  return filePath.split("/").pop() || filePath;
+}
+
+function fileDir(filePath) {
+  const parts = filePath.split("/");
+  if (parts.length <= 1) return "";
+  return parts.slice(0, -1).join("/");
+}
+
+function DiffViewer({ hunks }) {
+  if (!hunks || hunks.length === 0) {
+    return <div className="diff-empty">No changes</div>;
+  }
+
+  let oldLine = 0;
+  let newLine = 0;
+
+  return (
+    <div className="diff-viewer">
+      {hunks.map((hunk, hunkIndex) => {
+        oldLine = hunk.oldStart;
+        newLine = hunk.newStart;
+
+        return (
+          <div className="diff-hunk" key={hunkIndex}>
+            <div className="diff-hunk-header">{hunk.header}</div>
+            {hunk.lines.map((line, lineIndex) => {
+              let oldNum = "";
+              let newNum = "";
+
+              if (line.type === "ctx") {
+                oldNum = oldLine++;
+                newNum = newLine++;
+              } else if (line.type === "add") {
+                newNum = newLine++;
+              } else if (line.type === "del") {
+                oldNum = oldLine++;
+              }
+
+              return (
+                <div className={`diff-line diff-${line.type}`} key={`${hunkIndex}-${lineIndex}`}>
+                  <span className="diff-line-num old">{oldNum}</span>
+                  <span className="diff-line-num new">{newNum}</span>
+                  <span className="diff-line-marker">{line.type === "add" ? "+" : line.type === "del" ? "-" : " "}</span>
+                  <span className="diff-line-content">{line.content}</span>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReviewPanel({ session, onClose }) {
+  const [diffFiles, setDiffFiles] = useState([]);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [fileDiff, setFileDiff] = useState("");
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [loadingDiff, setLoadingDiff] = useState(false);
+
+  useEffect(() => {
+    if (!session) return;
+
+    let cancelled = false;
+    setLoadingFiles(true);
+
+    window.desktopApi.getDiffFiles({ sessionId: session.id }).then(result => {
+      if (cancelled) return;
+      setDiffFiles(result.files || []);
+      setLoadingFiles(false);
+      if (result.files && result.files.length > 0 && !selectedFile) {
+        setSelectedFile(result.files[0].path);
+      }
+    }).catch(() => {
+      if (!cancelled) setLoadingFiles(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [session?.id]);
+
+  useEffect(() => {
+    if (!session || !selectedFile) return;
+
+    let cancelled = false;
+    setLoadingDiff(true);
+
+    window.desktopApi.getFileDiff({ sessionId: session.id, filePath: selectedFile }).then(result => {
+      if (cancelled) return;
+      setFileDiff(result || "");
+      setLoadingDiff(false);
+    }).catch(() => {
+      if (!cancelled) setLoadingDiff(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [session?.id, selectedFile]);
+
+  const hunks = useMemo(() => parseDiff(fileDiff), [fileDiff]);
+  const branchDisplay = session?.currentBranch || session?.branch || "";
+  const totalAdd = diffFiles.reduce((s, f) => s + f.additions, 0);
+  const totalDel = diffFiles.reduce((s, f) => s + f.deletions, 0);
+
+  // Build file tabs - show first 3, then "+N more"
+  const visibleTabs = diffFiles.slice(0, 3);
+  const remainingCount = diffFiles.length - 3;
+
+  return (
+    <aside className="review-panel">
+      <div className="review-panel-header">
+        <div className="review-panel-title">
+          <svg className="review-panel-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M5.5 3.5L2 7l3.5 3.5M10.5 3.5L14 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span>Review Changes</span>
+          {session?.prNumber ? (
+            <span
+              className="review-pr-badge"
+              onClick={() => window.desktopApi.openExternal(session.prUrl)}
+            >
+              PR #{session.prNumber}
+            </span>
+          ) : null}
+        </div>
+        <button className="icon-button" type="button" onClick={onClose} title="Close review panel">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+
+      {selectedFile ? (
+        <>
+          <div className="review-file-tabs">
+            {visibleTabs.map(file => (
+              <button
+                className={`review-file-tab ${file.path === selectedFile ? "active" : ""}`}
+                key={file.path}
+                onClick={() => setSelectedFile(file.path)}
+                title={file.path}
+              >
+                {fileName(file.path)}
+              </button>
+            ))}
+            {remainingCount > 0 ? (
+              <span className="review-file-tab more">+{remainingCount} more</span>
+            ) : null}
+          </div>
+
+          <div className="review-diff-area">
+            {loadingDiff ? (
+              <div className="diff-loading">Loading diff...</div>
+            ) : (
+              <DiffViewer hunks={hunks} />
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="review-file-list">
+          {loadingFiles ? (
+            <div className="diff-loading">Loading changes...</div>
+          ) : diffFiles.length === 0 ? (
+            <div className="diff-empty">No changes detected</div>
+          ) : (
+            <>
+              <div className="review-file-list-header">
+                <span className="review-file-count">{diffFiles.length} changed files</span>
+                <span className="review-stats-total">
+                  <span className="diff-stat-add">+{totalAdd}</span>
+                  <span className="diff-stat-del">-{totalDel}</span>
+                </span>
+              </div>
+              {diffFiles.map(file => (
+                <button
+                  className="review-file-item"
+                  key={file.path}
+                  onClick={() => setSelectedFile(file.path)}
+                >
+                  <span className="review-file-icon">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                      <path d="M4 2h5.5L13 5.5V13a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.2" />
+                      <path d="M9 2v4h4" stroke="currentColor" strokeWidth="1.2" />
+                    </svg>
+                  </span>
+                  <div className="review-file-info">
+                    <span className="review-file-name">{fileName(file.path)}</span>
+                    {fileDir(file.path) ? <span className="review-file-dir">{fileDir(file.path)}</span> : null}
+                  </div>
+                  <span className="review-file-stats">
+                    {file.additions > 0 ? <span className="diff-stat-add">+{file.additions}</span> : null}
+                    {file.deletions > 0 ? <span className="diff-stat-del">-{file.deletions}</span> : null}
+                  </span>
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {selectedFile ? (
+        <div className="review-panel-footer">
+          <button className="review-back-btn" type="button" onClick={() => setSelectedFile(null)}>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+              <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            All files
+          </button>
+          <span className="review-current-file">{fileName(selectedFile)}</span>
+        </div>
+      ) : null}
+    </aside>
+  );
+}
+
 function SessionSignal({ state }) {
   if (state === "running") {
     return (
@@ -574,6 +836,10 @@ export default function App() {
     return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
   });
   const [sessionSignals, setSessionSignals] = useState({});
+  const [reviewPanelOpen, setReviewPanelOpen] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(REVIEW_PANEL_STORAGE_KEY) === "true";
+  });
   const activeSessionIdRef = useRef("");
   const sessionSignalTimersRef = useRef({});
 
@@ -586,6 +852,10 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed));
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    window.localStorage.setItem(REVIEW_PANEL_STORAGE_KEY, String(reviewPanelOpen));
+  }, [reviewPanelOpen]);
 
   useEffect(() => {
     const handleKeyDown = event => {
@@ -815,7 +1085,11 @@ export default function App() {
 
   return (
     <>
-      <div className={sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
+      <div className={[
+        "app-shell",
+        sidebarCollapsed && "sidebar-collapsed",
+        reviewPanelOpen && activeSession && "review-open",
+      ].filter(Boolean).join(" ")}>
         <aside className="sidebar">
           <div className="sidebar-top">
             {!sidebarCollapsed ? (
@@ -891,7 +1165,15 @@ export default function App() {
                       <div className="session-copy">
                         <div className="session-title-line">
                           <div className="session-title-block">
-                            <span className="session-title">{session.name}</span>
+                            <div className="session-title-row">
+                              <span className="session-title">{session.name}</span>
+                              {session.diffStats && (session.diffStats.totalAdditions > 0 || session.diffStats.totalDeletions > 0) ? (
+                                <span className="session-diff-stats">
+                                  {session.diffStats.totalAdditions > 0 ? <span className="diff-stat-add">+{session.diffStats.totalAdditions}</span> : null}
+                                  {session.diffStats.totalDeletions > 0 ? <span className="diff-stat-del">-{session.diffStats.totalDeletions}</span> : null}
+                                </span>
+                              ) : null}
+                            </div>
                             <div className="session-meta-text">
                               <span className={`session-runtime runtime-${session.runtime}`}>{runtimeLabel(session.runtime)}</span>
                               {(session.currentBranch || session.branch) ? (
@@ -1060,6 +1342,17 @@ export default function App() {
                       </>
                     ) : null}
                     {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
+                    <button
+                      className={`terminal-chip review-toggle ${reviewPanelOpen ? "active" : ""}`}
+                      type="button"
+                      onClick={() => setReviewPanelOpen(current => !current)}
+                      title="Toggle review panel"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                        <path d="M5.5 3.5L2 7l3.5 3.5M10.5 3.5L14 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      Changes
+                    </button>
                   </div>
                 </div>
 
@@ -1084,6 +1377,10 @@ export default function App() {
             </section>
           )}
         </main>
+
+        {reviewPanelOpen && activeSession ? (
+          <ReviewPanel session={activeSession} onClose={() => setReviewPanelOpen(false)} />
+        ) : null}
       </div>
 
       <SessionComposerOverlay

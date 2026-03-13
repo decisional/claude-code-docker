@@ -251,6 +251,51 @@ async function getContainerGitInfo(containerName) {
   }
 }
 
+async function getContainerDiffStats(containerName) {
+  try {
+    const { stdout } = await runCommand("docker", [
+      "exec",
+      containerName,
+      "bash",
+      "-c",
+      'cd /workspace/*/ 2>/dev/null && git diff main --numstat 2>/dev/null || git diff HEAD --numstat 2>/dev/null || echo ""',
+    ]);
+    const lines = stdout.trim().split("\n").filter(Boolean);
+    let totalAdditions = 0;
+    let totalDeletions = 0;
+    const files = [];
+    for (const line of lines) {
+      const parts = line.split("\t");
+      if (parts.length < 3) continue;
+      const additions = parts[0] === "-" ? 0 : parseInt(parts[0], 10) || 0;
+      const deletions = parts[1] === "-" ? 0 : parseInt(parts[1], 10) || 0;
+      const filePath = parts.slice(2).join("\t");
+      totalAdditions += additions;
+      totalDeletions += deletions;
+      files.push({ path: filePath, additions, deletions });
+    }
+    return { totalAdditions, totalDeletions, files };
+  } catch {
+    return { totalAdditions: 0, totalDeletions: 0, files: [] };
+  }
+}
+
+async function getContainerDiff(containerName, filePath) {
+  try {
+    const fileArg = filePath ? `-- ${filePath}` : "";
+    const { stdout } = await runCommand("docker", [
+      "exec",
+      containerName,
+      "bash",
+      "-c",
+      `cd /workspace/*/ 2>/dev/null && git diff main ${fileArg} 2>/dev/null || git diff HEAD ${fileArg} 2>/dev/null || echo ""`,
+    ]);
+    return stdout;
+  } catch {
+    return "";
+  }
+}
+
 async function getPrForBranch(repoSlug, branch) {
   if (!repoSlug || !branch || branch === "main" || branch === "master") {
     return null;
@@ -341,6 +386,10 @@ async function refreshSessionsFromDocker() {
         session.prUrl = pr ? pr.url : null;
         prCache.set(session.id, { branch, prNumber: session.prNumber, prUrl: session.prUrl });
       }
+
+      // Also fetch diff stats for sidebar +/- counts
+      const diffStats = await getContainerDiffStats(session.containerName);
+      session.diffStats = diffStats;
     }
   });
   await Promise.all(gitPromises);
@@ -742,6 +791,22 @@ ipcMain.handle("sessions:resize", async (_event, payload) => {
   }
   live.term.resize(Math.max(40, payload.cols || 120), Math.max(12, payload.rows || 32));
   return true;
+});
+
+ipcMain.handle("sessions:get-diff-files", async (_event, payload) => {
+  const session = getSessionById(payload.sessionId);
+  if (!session || !session.containerName) {
+    return { totalAdditions: 0, totalDeletions: 0, files: [] };
+  }
+  return getContainerDiffStats(session.containerName);
+});
+
+ipcMain.handle("sessions:get-file-diff", async (_event, payload) => {
+  const session = getSessionById(payload.sessionId);
+  if (!session || !session.containerName) {
+    return "";
+  }
+  return getContainerDiff(session.containerName, payload.filePath || "");
 });
 
 ipcMain.handle("clipboard:read-text", async () => clipboard.readText());
