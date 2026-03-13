@@ -1282,19 +1282,27 @@ export default function App() {
         return;
       }
 
-      // Cmd+Shift+C — new Claude session
+      // Cmd+Shift+C — quick-create Claude session (skip form)
       if (key === "c" && mod && event.shiftKey) {
         event.preventDefault();
-        setComposerRuntime("claude");
-        setShowComposer(true);
+        handleCreate({
+          runtime: "claude",
+          name: buildSuggestedSessionName("claude", sessions),
+          branch: "",
+          port: "",
+        });
         return;
       }
 
-      // Cmd+Shift+X — new Codex session
+      // Cmd+Shift+X — quick-create Codex session (skip form)
       if (key === "x" && mod && event.shiftKey) {
         event.preventDefault();
-        setComposerRuntime("codex");
-        setShowComposer(true);
+        handleCreate({
+          runtime: "codex",
+          name: buildSuggestedSessionName("codex", sessions),
+          branch: "",
+          port: "",
+        });
         return;
       }
 
