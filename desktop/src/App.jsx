@@ -966,6 +966,7 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession })
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedRuntime, setSelectedRuntime] = useState("claude");
   const [submitting, setSubmitting] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -1027,8 +1028,6 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession })
     prompt += "\n\nPlease read the full ticket using the /linear skill if available, then start working on it.";
     return prompt;
   };
-
-  const [copied, setCopied] = useState(false);
 
   const handleCopyPrompt = async () => {
     if (!ticket) return;
