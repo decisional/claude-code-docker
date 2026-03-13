@@ -377,8 +377,14 @@ function SessionAvatar({ session }) {
   return <span className={`session-avatar runtime-${session.runtime}`}>{sessionMonogram(session.name)}</span>;
 }
 
-function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate }) {
-  const [runtime, setRuntime] = useState("claude");
+function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, defaultRuntime }) {
+  const [runtime, setRuntime] = useState(defaultRuntime || "claude");
+
+  useEffect(() => {
+    if (open && defaultRuntime) {
+      setRuntime(defaultRuntime);
+    }
+  }, [open, defaultRuntime]);
   const [name, setName] = useState("");
   const [branch, setBranch] = useState("");
   const [port, setPort] = useState("");
@@ -526,6 +532,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showComposer, setShowComposer] = useState(false);
+  const [composerRuntime, setComposerRuntime] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") {
       return false;
@@ -549,15 +556,68 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = event => {
-      if (event.key.toLowerCase() === SIDEBAR_SHORTCUT_KEY && (event.metaKey || event.ctrlKey)) {
+      const key = event.key.toLowerCase();
+      const mod = event.metaKey || event.ctrlKey;
+
+      // Cmd+B — toggle sidebar
+      if (key === SIDEBAR_SHORTCUT_KEY && mod) {
         event.preventDefault();
         setSidebarCollapsed(current => !current);
+        return;
+      }
+
+      // Cmd+Shift+C — new Claude session
+      if (key === "c" && mod && event.shiftKey) {
+        event.preventDefault();
+        setComposerRuntime("claude");
+        setShowComposer(true);
+        return;
+      }
+
+      // Cmd+Shift+X — new Codex session
+      if (key === "x" && mod && event.shiftKey) {
+        event.preventDefault();
+        setComposerRuntime("codex");
+        setShowComposer(true);
+        return;
+      }
+
+      // Cmd+N — new session (default)
+      if (key === "n" && mod) {
+        event.preventDefault();
+        setComposerRuntime("");
+        setShowComposer(true);
+        return;
+      }
+
+      // Cmd+[ / Cmd+] — previous/next session
+      if ((key === "[" || key === "]") && mod && sessions.length > 0) {
+        event.preventDefault();
+        const currentIndex = sessions.findIndex(s => s.id === activeSessionIdRef.current);
+        let nextIndex;
+        if (key === "]") {
+          nextIndex = currentIndex < sessions.length - 1 ? currentIndex + 1 : 0;
+        } else {
+          nextIndex = currentIndex > 0 ? currentIndex - 1 : sessions.length - 1;
+        }
+        selectSession(sessions[nextIndex].id);
+        return;
+      }
+
+      // Cmd+1 through Cmd+9 — jump to session by position
+      if (mod && !event.shiftKey && event.key >= "1" && event.key <= "9") {
+        event.preventDefault();
+        const index = parseInt(event.key, 10) - 1;
+        if (index < sessions.length) {
+          selectSession(sessions[index].id);
+        }
+        return;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [sessions]);
 
   useEffect(() => {
     let ignore = false;
@@ -983,6 +1043,7 @@ export default function App() {
         disabled={busy}
         onClose={() => setShowComposer(false)}
         onCreate={handleCreate}
+        defaultRuntime={composerRuntime}
       />
     </>
   );
