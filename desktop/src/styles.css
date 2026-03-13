@@ -7,12 +7,12 @@
     "Segoe UI",
     system-ui,
     sans-serif;
-  --bg: #1a1d1a;
-  --main: #1e211e;
-  --sidebar: #252825;
-  --sidebar-hover: rgba(255, 255, 255, 0.05);
-  --sidebar-active: rgba(255, 255, 255, 0.08);
-  --surface: #2a2d2a;
+  --bg: #131513;
+  --main: #171917;
+  --sidebar: #1a1c1a;
+  --sidebar-hover: rgba(255, 255, 255, 0.04);
+  --sidebar-active: rgba(255, 255, 255, 0.07);
+  --surface: #222422;
   --line: rgba(255, 255, 255, 0.08);
   --line-strong: rgba(255, 255, 255, 0.14);
   --text: #e8e8e6;
@@ -27,7 +27,7 @@
   --success: #6db86d;
   --warning: #d4a843;
   --danger: #d46a6a;
-  background: #1a1d1a;
+  background: #131513;
   color: var(--text);
 }
 
@@ -152,11 +152,10 @@ input:focus {
 .sidebar-chrome {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 4px 4px 4px 8px;
+  gap: 6px;
+  padding: 6px 6px;
   -webkit-app-region: drag;
   border-bottom: 1px solid var(--line);
-  padding-bottom: 8px;
 }
 
 .sidebar-chrome .icon-button,
@@ -164,24 +163,39 @@ input:focus {
   -webkit-app-region: no-drag;
 }
 
+.sidebar-chrome .sidebar-title {
+  flex: 1;
+}
+
 .sidebar-chrome.compact {
-  justify-content: center;
+  flex-direction: column;
   gap: 4px;
-  padding: 4px;
-  padding-bottom: 8px;
+  padding: 6px 4px;
 }
 
-.sidebar-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.collapse-btn {
-  font-size: 16px;
+.collapse-toggle {
   color: var(--text-muted);
-  min-width: 24px;
-  min-height: 24px;
+  min-width: 26px;
+  min-height: 26px;
+  border-radius: 6px;
+}
+
+.collapse-toggle:hover {
+  background: var(--hover);
+  color: var(--text-dim);
+}
+
+.new-session-btn {
+  color: var(--text-dim);
+  min-width: 26px;
+  min-height: 26px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.new-session-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
 }
 
 .sidebar-title {
@@ -251,6 +265,10 @@ input:focus {
 
 .icon-button.strong:hover {
   opacity: 0.9;
+}
+
+.icon-button svg {
+  display: block;
 }
 
 .primary {
@@ -700,7 +718,7 @@ input:focus {
   position: relative;
   min-height: 0;
   overflow: hidden;
-  background: #0d1017;
+  background: #1a1d1a;
   border: none;
   border-radius: 0;
   box-shadow: none;
@@ -716,7 +734,7 @@ input:focus {
   min-height: 40px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--line);
-  background: rgba(13, 16, 23, 0.95);
+  background: rgba(26, 29, 26, 0.95);
   backdrop-filter: blur(12px);
 }
 

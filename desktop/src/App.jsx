@@ -154,10 +154,26 @@ function SessionTerminal({ sessionId, active }) {
       fontSize: 13,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       theme: {
-        background: "#0d1017",
-        foreground: "#edf2f7",
-        cursor: "#f7fafc",
-        selectionBackground: "#243244",
+        background: "#1a1d1a",
+        foreground: "#e8e8e6",
+        cursor: "#8bc48b",
+        selectionBackground: "rgba(139, 196, 139, 0.15)",
+        black: "#1a1d1a",
+        brightBlack: "#4a4a46",
+        white: "#e8e8e6",
+        brightWhite: "#f5f5f3",
+        green: "#8bc48b",
+        brightGreen: "#6db86d",
+        yellow: "#d4a843",
+        brightYellow: "#e0be6a",
+        red: "#d46a6a",
+        brightRed: "#e08888",
+        blue: "#60a5fa",
+        brightBlue: "#93c5fd",
+        cyan: "#5eead4",
+        brightCyan: "#99f6e4",
+        magenta: "#c084fc",
+        brightMagenta: "#d8b4fe",
       },
       scrollback: 10000,
       allowTransparency: false,
@@ -794,33 +810,39 @@ export default function App() {
           <div className="sidebar-top">
             {!sidebarCollapsed ? (
               <div className="sidebar-chrome">
+                <button
+                  className="icon-button collapse-toggle"
+                  type="button"
+                  onClick={() => setSidebarCollapsed(true)}
+                  title="Collapse sidebar (Cmd+B)"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
                 <h1 className="sidebar-title">Sessions</h1>
-                <div className="sidebar-actions">
-                  <button className="icon-button strong" type="button" onClick={() => setShowComposer(true)} title="New session (Cmd+N)">
-                    +
-                  </button>
-                  <button
-                    className="icon-button collapse-btn"
-                    type="button"
-                    onClick={() => setSidebarCollapsed(true)}
-                    title="Collapse sidebar (Cmd+B)"
-                  >
-                    &#x2039;
-                  </button>
-                </div>
+                <button className="icon-button new-session-btn" type="button" onClick={() => setShowComposer(true)} title="New session (Cmd+N)">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
               </div>
             ) : (
               <div className="sidebar-chrome compact">
-                <button className="icon-button strong" type="button" onClick={() => setShowComposer(true)} title="New session (Cmd+N)">
-                  +
-                </button>
                 <button
-                  className="icon-button collapse-btn"
+                  className="icon-button collapse-toggle"
                   type="button"
                   onClick={() => setSidebarCollapsed(false)}
                   title="Expand sidebar (Cmd+B)"
                 >
-                  &#x203A;
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <button className="icon-button new-session-btn" type="button" onClick={() => setShowComposer(true)} title="New session (Cmd+N)">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
                 </button>
               </div>
             )}
