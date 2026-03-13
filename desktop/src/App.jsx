@@ -351,12 +351,22 @@ function SessionFacts({ session, className = "session-facts" }) {
         </span>
       ))}
       {session.prNumber ? (
-        <span
-          className="session-fact session-pr-link"
-          onClick={() => window.desktopApi.openExternal(session.prUrl)}
-        >
-          PR #{session.prNumber}
-        </span>
+        <>
+          <span
+            className="session-fact session-pr-link"
+            onClick={() => window.desktopApi.openExternal(session.prUrl)}
+          >
+            PR #{session.prNumber}
+          </span>
+          {session.repoSlug ? (
+            <span
+              className="session-fact session-pr-link devin-link"
+              onClick={() => window.desktopApi.openExternal(`https://app.devin.ai/review/${session.repoSlug}/pull/${session.prNumber}`)}
+            >
+              Devin
+            </span>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
@@ -374,7 +384,7 @@ function SessionSignal({ state }) {
   }
 
   if (state === "attention") {
-    return <span className="session-signal attention">New output</span>;
+    return <span className="session-signal attention">Needs review</span>;
   }
 
   return null;
@@ -860,7 +870,12 @@ export default function App() {
 
               {sessions.map(session => (
                 <button
-                  className={session.id === activeSessionId ? "session-item active" : "session-item"}
+                  className={[
+                    "session-item",
+                    session.id === activeSessionId && "active",
+                    sessionSignals[session.id] === "attention" && "attention",
+                    sessionSignals[session.id] === "running" && "has-output",
+                  ].filter(Boolean).join(" ")}
                   key={session.id}
                   title={sessionTitle(session)}
                   type="button"
@@ -883,16 +898,30 @@ export default function App() {
                                 <span title="Current git branch">{session.currentBranch || session.branch}</span>
                               ) : null}
                               {session.prNumber ? (
-                                <span
-                                  className="session-pr-link"
-                                  title={`Open PR #${session.prNumber}`}
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    window.desktopApi.openExternal(session.prUrl);
-                                  }}
-                                >
-                                  PR #{session.prNumber}
-                                </span>
+                                <>
+                                  <span
+                                    className="session-pr-link"
+                                    title={`Open PR #${session.prNumber}`}
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      window.desktopApi.openExternal(session.prUrl);
+                                    }}
+                                  >
+                                    PR #{session.prNumber}
+                                  </span>
+                                  {session.repoSlug ? (
+                                    <span
+                                      className="session-pr-link devin-link"
+                                      title="Open in Devin"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        window.desktopApi.openExternal(`https://app.devin.ai/review/${session.repoSlug}/pull/${session.prNumber}`);
+                                      }}
+                                    >
+                                      Devin
+                                    </span>
+                                  ) : null}
+                                </>
                               ) : null}
                               {session.port ? <span>port {session.port}</span> : null}
                             </div>
@@ -1013,12 +1042,22 @@ export default function App() {
                   <div className="terminal-toolbar-aside">
                     {(activeSession.currentBranch || activeSession.branch) ? <span className="terminal-chip">branch {activeSession.currentBranch || activeSession.branch}</span> : null}
                     {activeSession.prNumber ? (
-                      <span
-                        className="terminal-chip session-pr-link"
-                        onClick={() => window.desktopApi.openExternal(activeSession.prUrl)}
-                      >
-                        PR #{activeSession.prNumber}
-                      </span>
+                      <>
+                        <span
+                          className="terminal-chip session-pr-link"
+                          onClick={() => window.desktopApi.openExternal(activeSession.prUrl)}
+                        >
+                          PR #{activeSession.prNumber}
+                        </span>
+                        {activeSession.repoSlug ? (
+                          <span
+                            className="terminal-chip session-pr-link devin-link"
+                            onClick={() => window.desktopApi.openExternal(`https://app.devin.ai/review/${activeSession.repoSlug}/pull/${activeSession.prNumber}`)}
+                          >
+                            Devin
+                          </span>
+                        ) : null}
+                      </>
                     ) : null}
                     {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
                   </div>

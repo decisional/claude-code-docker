@@ -111,12 +111,7 @@ function dedupeSessions(sessions) {
 
 function sortedSessions(sessions) {
   return [...sessions].sort((a, b) => {
-    const aActive = liveSessions.has(a.id) ? 0 : 1;
-    const bActive = liveSessions.has(b.id) ? 0 : 1;
-    if (aActive !== bActive) {
-      return aActive - bActive;
-    }
-    return (b.lastOpenedAt || b.createdAt || "").localeCompare(a.lastOpenedAt || a.createdAt || "");
+    return (b.createdAt || "").localeCompare(a.createdAt || "");
   });
 }
 
@@ -333,6 +328,7 @@ async function refreshSessionsFromDocker() {
     if (session.containerName && (session.status === "running" || session.status === "attached")) {
       const { branch, repoSlug } = await getContainerGitInfo(session.containerName);
       session.currentBranch = branch;
+      session.repoSlug = repoSlug || "";
 
       // Only query GitHub for PR when the branch changes
       const cached = prCache.get(session.id);

@@ -332,6 +332,14 @@ input:focus {
   color: var(--accent-strong);
 }
 
+.devin-link {
+  color: #60a5fa;
+}
+
+.devin-link:hover {
+  color: #93c5fd;
+}
+
 /* ── Sidebar footer ── */
 
 .sidebar-footer {
@@ -411,6 +419,16 @@ input:focus {
 .session-item.active {
   background: var(--sidebar-active);
   border-color: var(--line);
+}
+
+.session-item.attention {
+  border-left: 2px solid var(--warning);
+  background: rgba(212, 168, 67, 0.06);
+}
+
+.session-item.has-output {
+  border-left: 2px solid var(--success);
+  background: rgba(109, 184, 109, 0.04);
 }
 
 .session-item-main {
