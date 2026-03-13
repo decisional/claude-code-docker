@@ -498,7 +498,8 @@ function notifyIfHidden(title, body, options = {}) {
   }
 }
 
-async function startInteractiveSession(session, mode = "start", size = { cols: 120, rows: 32 }) {
+async function startInteractiveSession(session, mode = "start", size) {
+  const termSize = { cols: (size && size.cols) || 120, rows: (size && size.rows) || 32 };
   const existing = liveSessions.get(session.id);
   if (existing) {
     return session;
@@ -527,8 +528,8 @@ async function startInteractiveSession(session, mode = "start", size = { cols: 1
     term = pty.spawn("/bin/bash", args, {
       cwd: repoPath,
       env,
-      cols: size.cols || 120,
-      rows: size.rows || 32,
+      cols: termSize.cols,
+      rows: termSize.rows,
       name: "xterm-256color",
     });
   } catch (error) {
@@ -1147,7 +1148,7 @@ ipcMain.handle("sessions:create-with-ticket", async (_event, payload) => {
     });
   }
 
-  await startInteractiveSession(session, "start", payload.size || undefined);
+  await startInteractiveSession(session, "start", payload.size || { cols: 120, rows: 32 });
 
   // Inject Linear API key into the container and move ticket to In Progress
   const apiKey = appState.settings.linearApiKey;
