@@ -917,7 +917,7 @@ function LinearSettingsOverlay({ open, onClose, settings, onSave }) {
     setTestResult(null);
     try {
       await onSave({ linearApiKey: apiKey.trim() });
-      setTestResult({ ok: true, message: "Saved successfully." });
+      onClose();
     } catch (err) {
       setTestResult({ ok: false, message: err.message || "Failed to save." });
     } finally {
@@ -991,6 +991,7 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession, o
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedRuntime, setSelectedRuntime] = useState("claude");
   const [submitting, setSubmitting] = useState(false);
+  const submitRef = useRef(null);
 
   useEffect(() => {
     if (!open) return;
@@ -1005,6 +1006,8 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession, o
         setTickets(result.tickets);
         setViewer(result.viewer);
         setLoading(false);
+        // Auto-focus submit after tickets load
+        setTimeout(() => { if (submitRef.current) submitRef.current.focus(); }, 100);
       })
       .catch(err => {
         setError(err.message || "Failed to fetch tickets.");
@@ -1015,7 +1018,15 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession, o
   useEffect(() => {
     if (!open) return undefined;
     const handleKeyDown = event => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Tab toggles between Claude and Codex
+      if (event.key === "Tab") {
+        event.preventDefault();
+        setSelectedRuntime(r => (r === "claude" ? "codex" : "claude"));
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -1165,7 +1176,7 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession, o
               <button className="secondary" type="button" onClick={handleSkip} disabled={currentIndex >= tickets.length - 1}>
                 Skip
               </button>
-              <button className="primary" type="button" onClick={handleSubmit} disabled={submitting || busy}>
+              <button className="primary" type="button" onClick={handleSubmit} disabled={submitting || busy} ref={submitRef}>
                 {submitting ? "Starting..." : `Start ${runtimeLabel(selectedRuntime)}`}
               </button>
             </div>
