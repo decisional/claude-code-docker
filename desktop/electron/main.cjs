@@ -8,6 +8,8 @@ const pty = require("node-pty");
 
 const liveSessions = new Map();
 const notificationCooldowns = new Map();
+// Cache PR lookups per session: sessionId -> { branch, prNumber, prUrl }
+const prCache = new Map();
 let mainWindow = null;
 let storePath = "";
 let appState = {
@@ -331,9 +333,18 @@ async function refreshSessionsFromDocker() {
     if (session.containerName && (session.status === "running" || session.status === "attached")) {
       const { branch, repoSlug } = await getContainerGitInfo(session.containerName);
       session.currentBranch = branch;
-      const pr = await getPrForBranch(repoSlug, branch);
-      session.prNumber = pr ? pr.number : null;
-      session.prUrl = pr ? pr.url : null;
+
+      // Only query GitHub for PR when the branch changes
+      const cached = prCache.get(session.id);
+      if (cached && cached.branch === branch) {
+        session.prNumber = cached.prNumber;
+        session.prUrl = cached.prUrl;
+      } else {
+        const pr = await getPrForBranch(repoSlug, branch);
+        session.prNumber = pr ? pr.number : null;
+        session.prUrl = pr ? pr.url : null;
+        prCache.set(session.id, { branch, prNumber: session.prNumber, prUrl: session.prUrl });
+      }
     }
   });
   await Promise.all(gitPromises);
