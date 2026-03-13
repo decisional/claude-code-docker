@@ -394,14 +394,30 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
   const suggestedName = useMemo(() => buildSuggestedSessionName(runtime, sessions, branch), [runtime, sessions, branch]);
   const resolvedName = normalizedName || suggestedName;
 
+  const submitRef = useRef(null);
+
   useEffect(() => {
     if (!open) {
       return undefined;
     }
 
+    // Auto-focus submit button so Enter works immediately
+    setTimeout(() => {
+      if (submitRef.current) {
+        submitRef.current.focus();
+      }
+    }, 50);
+
     const handleKeyDown = event => {
       if (event.key === "Escape") {
         onClose();
+        return;
+      }
+
+      // Tab toggles between Claude and Codex (unless in an input field)
+      if (event.key === "Tab" && event.target.tagName !== "INPUT") {
+        event.preventDefault();
+        setRuntime(current => (current === "claude" ? "codex" : "claude"));
       }
     };
 
@@ -514,7 +530,7 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
             <button className="secondary" type="button" onClick={onClose}>
               Cancel
             </button>
-            <button className="primary" type="submit" disabled={disabled}>
+            <button className="primary" type="submit" disabled={disabled} ref={submitRef}>
               {disabled ? "Starting..." : `Start ${runtimeLabel(runtime)}`}
             </button>
           </div>
