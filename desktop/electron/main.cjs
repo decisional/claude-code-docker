@@ -444,9 +444,9 @@ async function refreshSessionsFromDocker() {
       session.currentBranch = branch;
       session.repoSlug = repoSlug || "";
 
-      // Only query GitHub for PR when the branch changes
+      // Only query GitHub for PR when the branch changes or we haven't found a PR yet
       const cached = prCache.get(session.id);
-      if (cached && cached.branch === branch) {
+      if (cached && cached.branch === branch && cached.prNumber) {
         session.prNumber = cached.prNumber;
         session.prUrl = cached.prUrl;
       } else {
