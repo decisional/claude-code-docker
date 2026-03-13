@@ -637,6 +637,15 @@ export default function App() {
     };
   }, []);
 
+  const focusActiveTerminal = () => {
+    setTimeout(() => {
+      const active = document.querySelector(".terminal-host.active textarea");
+      if (active) {
+        active.focus();
+      }
+    }, 100);
+  };
+
   const selectSession = async sessionId => {
     setActiveSessionId(sessionId);
 
@@ -668,6 +677,8 @@ export default function App() {
         setBusy(false);
       }
     }
+
+    focusActiveTerminal();
   };
 
   const handleCreate = async payload => {
