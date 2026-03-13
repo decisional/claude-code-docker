@@ -336,6 +336,12 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
     # Otherwise, create a new tmux session running the CLI.
     TMUX_SESSION="llm-session"
 
+    # On reset (RESET_TO_MAIN=true), kill the old tmux session so we get a fresh CLI.
+    if [ "$RESET_TO_MAIN" = "true" ] && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+        echo "🗑  Ending previous session for reset..."
+        tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
+    fi
+
     if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
         echo "🔄 Reattaching to existing session..."
         echo ""
