@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, nativeTheme, powerMonitor } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, nativeTheme, powerMonitor, shell } = require("electron");
 const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
@@ -8,6 +8,8 @@ const pty = require("node-pty");
 
 const liveSessions = new Map();
 const notificationCooldowns = new Map();
+// Cache PR lookups per session: sessionId -> { branch, prNumber, prUrl }
+const prCache = new Map();
 let mainWindow = null;
 let storePath = "";
 let appState = {
@@ -233,6 +235,54 @@ async function getDockerContainers() {
   }
 }
 
+async function getContainerGitInfo(containerName) {
+  try {
+    const { stdout } = await runCommand("docker", [
+      "exec",
+      containerName,
+      "bash",
+      "-c",
+      "cd /workspace/*/ 2>/dev/null && echo $(git branch --show-current) && git remote get-url origin",
+    ]);
+    const lines = stdout.trim().split("\n");
+    const branch = (lines[0] || "").trim();
+    const remoteUrl = (lines[1] || "").trim();
+    // Extract org/repo from git@github.com:org/repo.git or https://github.com/org/repo.git
+    const match = remoteUrl.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+    const repoSlug = match ? match[1] : "";
+    return { branch, repoSlug };
+  } catch {
+    return { branch: "", repoSlug: "" };
+  }
+}
+
+async function getPrForBranch(repoSlug, branch) {
+  if (!repoSlug || !branch || branch === "main" || branch === "master") {
+    return null;
+  }
+  try {
+    const { stdout } = await runCommand("gh", [
+      "pr",
+      "list",
+      "--repo",
+      repoSlug,
+      "--head",
+      branch,
+      "--json",
+      "number,url",
+      "--jq",
+      ".[0]",
+    ]);
+    const trimmed = stdout.trim();
+    if (!trimmed) {
+      return null;
+    }
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+}
+
 async function refreshSessionsFromDocker() {
   const dockerSessions = await getDockerContainers();
   const enriched = [...appState.sessions];
@@ -277,6 +327,27 @@ async function refreshSessionsFromDocker() {
       enriched.push(next);
     }
   });
+
+  // Fetch current git branch and PR info for running containers (in parallel)
+  const gitPromises = enriched.map(async session => {
+    if (session.containerName && (session.status === "running" || session.status === "attached")) {
+      const { branch, repoSlug } = await getContainerGitInfo(session.containerName);
+      session.currentBranch = branch;
+
+      // Only query GitHub for PR when the branch changes
+      const cached = prCache.get(session.id);
+      if (cached && cached.branch === branch) {
+        session.prNumber = cached.prNumber;
+        session.prUrl = cached.prUrl;
+      } else {
+        const pr = await getPrForBranch(repoSlug, branch);
+        session.prNumber = pr ? pr.number : null;
+        session.prUrl = pr ? pr.url : null;
+        prCache.set(session.id, { branch, prNumber: session.prNumber, prUrl: session.prUrl });
+      }
+    }
+  });
+  await Promise.all(gitPromises);
 
   // Remove sessions whose Docker containers no longer exist (unless still starting)
   const dockerContainerNames = new Set(dockerSessions.map(c => c.name));
@@ -699,6 +770,27 @@ ipcMain.handle("clipboard:read-file-paths", async () => {
   }
 
   return [...new Set(paths)].filter(Boolean);
+});
+
+ipcMain.handle("shell:open-external", async (_event, url) => {
+  if (typeof url === "string" && url.startsWith("https://")) {
+    await shell.openExternal(url);
+  }
+});
+
+ipcMain.handle("dialog:confirm", async (_event, options) => {
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: "question",
+    buttons: options.buttons || ["Cancel", "OK"],
+    defaultId: options.defaultId ?? 0,
+    message: options.message || "Are you sure?",
+  });
+  return result.response === 1;
+});
+
+ipcMain.handle("docker:prune", async () => {
+  const { stdout } = await runCommand("docker", ["system", "prune", "-f"]);
+  return stdout.trim();
 });
 
 ipcMain.handle("sessions:stop", async (_event, payload) => {

@@ -188,6 +188,8 @@ input:focus {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 .sidebar-chrome,
@@ -393,6 +395,50 @@ input:focus {
   background: rgba(148, 163, 184, 0.08);
   color: var(--text-dim);
   font-size: 10px;
+}
+
+.session-pr-link {
+  cursor: pointer;
+  color: #60a5fa;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.prune-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.08);
+  color: #f87171;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.prune-button:hover {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.prune-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.session-pr-link:hover {
+  text-decoration: underline;
+  color: #93bbfd;
 }
 
 .meta-pill.compact {
