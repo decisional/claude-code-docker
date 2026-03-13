@@ -89,7 +89,8 @@ function sessionMonogram(name) {
 }
 
 function sessionTitle(session) {
-  const facts = [runtimeLabel(session.runtime), session.branch ? `branch ${session.branch}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
+  const branchDisplay = session.currentBranch || session.branch || "";
+  const facts = [runtimeLabel(session.runtime), branchDisplay ? `branch ${branchDisplay}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
   return [session.name, facts.join(" | "), session.dockerStatus || ""].filter(Boolean).join("\n");
 }
 
@@ -328,7 +329,8 @@ function SessionStateDot({ status }) {
 }
 
 function SessionFacts({ session, className = "session-facts" }) {
-  const facts = [session.containerName, session.branch ? `branch ${session.branch}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
+  const branchDisplay = session.currentBranch || session.branch || "";
+  const facts = [session.containerName, branchDisplay ? `branch ${branchDisplay}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
 
   return (
     <div className={className}>
@@ -796,7 +798,9 @@ export default function App() {
                             <span className="session-title">{session.name}</span>
                             <div className="session-meta-text">
                               <span className={`session-runtime runtime-${session.runtime}`}>{runtimeLabel(session.runtime)}</span>
-                              {session.branch ? <span>branch {session.branch}</span> : null}
+                              {(session.currentBranch || session.branch) ? (
+                                <span title="Current git branch">{session.currentBranch || session.branch}</span>
+                              ) : null}
                               {session.port ? <span>port {session.port}</span> : null}
                             </div>
                           </div>
@@ -899,7 +903,7 @@ export default function App() {
                   </div>
 
                   <div className="terminal-toolbar-aside">
-                    {activeSession.branch ? <span className="terminal-chip">branch {activeSession.branch}</span> : null}
+                    {(activeSession.currentBranch || activeSession.branch) ? <span className="terminal-chip">branch {activeSession.currentBranch || activeSession.branch}</span> : null}
                     {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
                   </div>
                 </div>

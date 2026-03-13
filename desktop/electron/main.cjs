@@ -233,6 +233,21 @@ async function getDockerContainers() {
   }
 }
 
+async function getContainerGitBranch(containerName) {
+  try {
+    const { stdout } = await runCommand("docker", [
+      "exec",
+      containerName,
+      "git",
+      "branch",
+      "--show-current",
+    ]);
+    return stdout.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
 async function refreshSessionsFromDocker() {
   const dockerSessions = await getDockerContainers();
   const enriched = [...appState.sessions];
@@ -277,6 +292,14 @@ async function refreshSessionsFromDocker() {
       enriched.push(next);
     }
   });
+
+  // Fetch current git branch for running containers (in parallel)
+  const branchPromises = enriched.map(async session => {
+    if (session.containerName && (session.status === "running" || session.status === "attached")) {
+      session.currentBranch = await getContainerGitBranch(session.containerName);
+    }
+  });
+  await Promise.all(branchPromises);
 
   // Remove sessions whose Docker containers no longer exist (unless still starting)
   const dockerContainerNames = new Set(dockerSessions.map(c => c.name));
