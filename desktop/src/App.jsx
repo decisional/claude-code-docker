@@ -221,6 +221,15 @@ function SessionTerminal({ sessionId, active }) {
         window.desktopApi.sendInput({ sessionId, data: "\x15" });
         return false;
       }
+      // Shift+Enter inserts a newline instead of submitting.
+      // Send Escape + carriage-return (\x1b\r) which terminal apps like
+      // Claude Code and Codex interpret as Alt+Enter / newline.
+      if (event.shiftKey && event.key === "Enter") {
+        if (event.type === "keydown") {
+          window.desktopApi.sendInput({ sessionId, data: "\x1b\r" });
+        }
+        return false;
+      }
       return true;
     });
 
