@@ -1166,7 +1166,7 @@ export default function App() {
                         <div className="session-title-line">
                           <div className="session-title-block">
                             <div className="session-title-row">
-                              <span className="session-title">{session.name}</span>
+                              <span className="session-title">{session.threadTitle || session.name}</span>
                               {session.diffStats && (session.diffStats.totalAdditions > 0 || session.diffStats.totalDeletions > 0) ? (
                                 <span className="session-diff-stats">
                                   {session.diffStats.totalAdditions > 0 ? <span className="diff-stat-add">+{session.diffStats.totalAdditions}</span> : null}
@@ -1261,8 +1261,8 @@ export default function App() {
                   <div className="main-heading-top">
                     <SessionAvatar session={activeSession} />
                     <div className="main-heading-copy">
-                      <div className="eyebrow">Active session</div>
-                      <h2>{activeSession.name}</h2>
+                      <div className="eyebrow">{activeSession.name}</div>
+                      <h2>{activeSession.threadTitle || activeSession.name}</h2>
                     </div>
                   </div>
 

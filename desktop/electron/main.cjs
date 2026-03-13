@@ -251,6 +251,53 @@ async function getContainerGitInfo(containerName) {
   }
 }
 
+async function getContainerThreadTitle(containerName) {
+  try {
+    // Find the most recently modified conversation JSONL inside the container,
+    // then extract the first substantive user message as the thread title.
+    const { stdout } = await runCommand("docker", [
+      "exec",
+      containerName,
+      "bash",
+      "-c",
+      `LATEST=$(ls -t /home/node/.claude/projects/*/*.jsonl 2>/dev/null | head -1)
+if [ -z "$LATEST" ]; then exit 0; fi
+head -100 "$LATEST" | python3 -c "
+import sys, json
+for line in sys.stdin:
+    try:
+        obj = json.loads(line.strip())
+        if obj.get('type') == 'user':
+            msg = obj.get('message', {}).get('content', '')
+            text = ''
+            if isinstance(msg, list):
+                for part in msg:
+                    if isinstance(part, dict) and part.get('type') == 'text':
+                        text = part['text']
+                        break
+            else:
+                text = str(msg)
+            text = text.strip()
+            # Skip greetings and very short messages
+            if len(text) > 10:
+                # Truncate to first sentence or 120 chars
+                for sep in ['. ', '\\\\n', '\\n']:
+                    idx = text.find(sep)
+                    if 0 < idx < 120:
+                        text = text[:idx]
+                        break
+                print(text[:120])
+                break
+    except:
+        pass
+" 2>/dev/null`,
+    ]);
+    return stdout.trim();
+  } catch {
+    return "";
+  }
+}
+
 async function getContainerDiffStats(containerName) {
   try {
     const { stdout } = await runCommand("docker", [
@@ -390,6 +437,12 @@ async function refreshSessionsFromDocker() {
       // Also fetch diff stats for sidebar +/- counts
       const diffStats = await getContainerDiffStats(session.containerName);
       session.diffStats = diffStats;
+
+      // Extract thread title from the active Claude Code conversation
+      const threadTitle = await getContainerThreadTitle(session.containerName);
+      if (threadTitle) {
+        session.threadTitle = threadTitle;
+      }
     }
   });
   await Promise.all(gitPromises);
