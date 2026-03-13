@@ -652,15 +652,12 @@ input:focus {
 }
 
 .session-signal {
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .session-signal.running {
-  display: inline-flex;
-  gap: 3px;
   color: var(--success);
 }
 
@@ -668,21 +665,34 @@ input:focus {
   color: var(--warning);
 }
 
-.signal-dot {
+.signal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 4px);
+  grid-template-rows: repeat(3, 4px);
+  gap: 2px;
+}
+
+.signal-grid .signal-dot {
   width: 4px;
   height: 4px;
   border-radius: 50%;
   background: currentColor;
-  opacity: 0.3;
-  animation: signal-pulse 1s ease-in-out infinite;
+  opacity: 0.25;
+  animation: signal-pulse 1.2s ease-in-out infinite;
 }
 
-.signal-dot:nth-child(2) {
-  animation-delay: 120ms;
-}
+.signal-grid .signal-dot:nth-child(1) { animation-delay: 0ms; }
+.signal-grid .signal-dot:nth-child(2) { animation-delay: 100ms; }
+.signal-grid .signal-dot:nth-child(3) { animation-delay: 200ms; }
+.signal-grid .signal-dot:nth-child(4) { animation-delay: 300ms; }
+.signal-grid .signal-dot:nth-child(5) { animation-delay: 400ms; }
+.signal-grid .signal-dot:nth-child(6) { animation-delay: 500ms; }
 
-.signal-dot:nth-child(3) {
-  animation-delay: 240ms;
+.signal-attention-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
 }
 
 /* ── Main pane ── */

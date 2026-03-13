@@ -637,16 +637,25 @@ function ReviewPanel({ session, onClose }) {
 function SessionSignal({ state }) {
   if (state === "running") {
     return (
-      <span className="session-signal running" title="Background session is active">
-        <span className="signal-dot" />
-        <span className="signal-dot" />
-        <span className="signal-dot" />
+      <span className="session-signal running" title="Session is active">
+        <span className="signal-grid">
+          <span className="signal-dot" />
+          <span className="signal-dot" />
+          <span className="signal-dot" />
+          <span className="signal-dot" />
+          <span className="signal-dot" />
+          <span className="signal-dot" />
+        </span>
       </span>
     );
   }
 
   if (state === "attention") {
-    return <span className="session-signal attention">Needs review</span>;
+    return (
+      <span className="session-signal attention" title="Needs review">
+        <span className="signal-attention-dot" />
+      </span>
+    );
   }
 
   return null;
