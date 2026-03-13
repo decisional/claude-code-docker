@@ -216,6 +216,11 @@ function SessionTerminal({ sessionId, active }) {
           return false; // Prevent sending Ctrl+C to the terminal
         }
       }
+      // Cmd+Backspace clears the entire line (like Warp terminal)
+      if (event.metaKey && event.key === "Backspace" && event.type === "keydown") {
+        window.desktopApi.sendInput({ sessionId, data: "\x15" });
+        return false;
+      }
       return true;
     });
 
