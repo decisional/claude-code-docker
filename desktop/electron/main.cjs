@@ -1046,6 +1046,32 @@ ipcMain.handle("sessions:get-file-diff", async (_event, payload) => {
 ipcMain.handle("clipboard:read-text", async () => clipboard.readText());
 ipcMain.handle("clipboard:write-text", async (_event, text) => clipboard.writeText(text));
 
+ipcMain.handle("clipboard:read-image", async (_event, sessionId) => {
+  const image = clipboard.readImage();
+  if (image.isEmpty()) {
+    return null;
+  }
+
+  const session = getSessionById(sessionId);
+  if (!session || !session.containerName) {
+    return null;
+  }
+
+  const fileName = `clipboard-${Date.now()}.png`;
+  const hostPath = path.join(os.tmpdir(), fileName);
+  const containerPath = `/tmp/${fileName}`;
+
+  await fs.writeFile(hostPath, image.toPNG());
+
+  try {
+    await runCommand("docker", ["cp", hostPath, `${session.containerName}:${containerPath}`]);
+  } finally {
+    fs.unlink(hostPath).catch(() => {});
+  }
+
+  return containerPath;
+});
+
 ipcMain.handle("clipboard:read-file-paths", async () => {
   const formats = clipboard.availableFormats();
   const paths = [];
