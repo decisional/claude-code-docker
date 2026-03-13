@@ -795,14 +795,32 @@ export default function App() {
             {!sidebarCollapsed ? (
               <div className="sidebar-chrome">
                 <h1 className="sidebar-title">Sessions</h1>
-                <button className="icon-button strong" type="button" onClick={() => setShowComposer(true)} title="New session (Cmd+N)">
-                  +
-                </button>
+                <div className="sidebar-actions">
+                  <button className="icon-button strong" type="button" onClick={() => setShowComposer(true)} title="New session (Cmd+N)">
+                    +
+                  </button>
+                  <button
+                    className="icon-button collapse-btn"
+                    type="button"
+                    onClick={() => setSidebarCollapsed(true)}
+                    title="Collapse sidebar (Cmd+B)"
+                  >
+                    &#x2039;
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="sidebar-chrome compact">
                 <button className="icon-button strong" type="button" onClick={() => setShowComposer(true)} title="New session (Cmd+N)">
                   +
+                </button>
+                <button
+                  className="icon-button collapse-btn"
+                  type="button"
+                  onClick={() => setSidebarCollapsed(false)}
+                  title="Expand sidebar (Cmd+B)"
+                >
+                  &#x203A;
                 </button>
               </div>
             )}
