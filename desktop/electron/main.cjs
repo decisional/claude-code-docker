@@ -45,6 +45,7 @@ function createDefaultState() {
     settings: {
       repoPath: path.resolve(__dirname, "..", ".."),
       linearApiKey: "",
+      linearProject: "",
     },
     sessions: [],
   };
@@ -698,7 +699,12 @@ function linearGraphQL(apiKey, query, variables = {}) {
   });
 }
 
-async function fetchLinearTodoTickets(apiKey) {
+async function fetchLinearProjects(apiKey) {
+  const data = await linearGraphQL(apiKey, `{ projects(first: 50) { nodes { id name } } }`);
+  return data.projects.nodes;
+}
+
+async function fetchLinearTodoTickets(apiKey, projectName) {
   const query = `
     query {
       viewer {
@@ -711,13 +717,14 @@ async function fetchLinearTodoTickets(apiKey) {
   const viewerData = await linearGraphQL(apiKey, query);
   const viewerId = viewerData.viewer.id;
 
+  const projectFilter = projectName ? `project: { name: { eq: "${projectName}" } }` : "";
   const ticketsQuery = `
     query($userId: ID!) {
       issues(
         filter: {
           assignee: { id: { eq: $userId } }
           state: { type: { eq: "unstarted" } }
-          project: { name: { eq: "Autodex - Product Roadmap" } }
+          ${projectFilter}
         }
         orderBy: updatedAt
         first: 50
@@ -1066,8 +1073,20 @@ ipcMain.handle("linear:save-settings", async (_event, payload) => {
   if (payload.linearApiKey !== undefined) {
     appState.settings.linearApiKey = payload.linearApiKey;
   }
+  if (payload.linearProject !== undefined) {
+    appState.settings.linearProject = payload.linearProject;
+  }
   await persistState();
   return appState.settings;
+});
+
+ipcMain.handle("linear:get-projects", async () => {
+  await ensureStateLoaded();
+  const apiKey = appState.settings.linearApiKey;
+  if (!apiKey) {
+    throw new Error("Linear API key not configured.");
+  }
+  return fetchLinearProjects(apiKey);
 });
 
 ipcMain.handle("linear:get-tickets", async () => {
@@ -1076,7 +1095,7 @@ ipcMain.handle("linear:get-tickets", async () => {
   if (!apiKey) {
     throw new Error("Linear API key not configured. Please add it in Settings.");
   }
-  return fetchLinearTodoTickets(apiKey);
+  return fetchLinearTodoTickets(apiKey, appState.settings.linearProject || "");
 });
 
 ipcMain.handle("sessions:create-with-ticket", async (_event, payload) => {

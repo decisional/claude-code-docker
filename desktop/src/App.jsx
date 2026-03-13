@@ -891,14 +891,27 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
 
 function LinearSettingsOverlay({ open, onClose, settings, onSave }) {
   const [apiKey, setApiKey] = useState("");
+  const [project, setProject] = useState("");
+  const [projects, setProjects] = useState([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
   useEffect(() => {
     if (open) {
       setApiKey(settings.linearApiKey || "");
+      setProject(settings.linearProject || "");
       setTestResult(null);
     }
+  }, [open, settings.linearApiKey, settings.linearProject]);
+
+  // Fetch projects when the overlay opens and we have a key
+  useEffect(() => {
+    if (!open || !settings.linearApiKey) return;
+    setLoadingProjects(true);
+    window.desktopApi.getLinearProjects()
+      .then(result => { setProjects(result); setLoadingProjects(false); })
+      .catch(() => setLoadingProjects(false));
   }, [open, settings.linearApiKey]);
 
   useEffect(() => {
@@ -916,7 +929,7 @@ function LinearSettingsOverlay({ open, onClose, settings, onSave }) {
     setSaving(true);
     setTestResult(null);
     try {
-      await onSave({ linearApiKey: apiKey.trim() });
+      await onSave({ linearApiKey: apiKey.trim(), linearProject: project });
       onClose();
     } catch (err) {
       setTestResult({ ok: false, message: err.message || "Failed to save." });
@@ -930,7 +943,7 @@ function LinearSettingsOverlay({ open, onClose, settings, onSave }) {
     setTestResult(null);
     try {
       // Save first, then test by fetching tickets
-      await onSave({ linearApiKey: apiKey.trim() });
+      await onSave({ linearApiKey: apiKey.trim(), linearProject: project });
       const result = await window.desktopApi.getLinearTickets();
       setTestResult({ ok: true, message: `Connected as ${result.viewer.name} (${result.viewer.email}). Found ${result.tickets.length} To Do tickets.` });
     } catch (err) {
@@ -961,6 +974,25 @@ function LinearSettingsOverlay({ open, onClose, settings, onSave }) {
               placeholder="lin_api_..."
             />
             <small>Generate a personal API key from Linear Settings &gt; API.</small>
+          </label>
+
+          <label className="overlay-field">
+            <span>Project Filter</span>
+            <select
+              value={project}
+              onChange={e => setProject(e.target.value)}
+              className="linear-select"
+            >
+              <option value="">All projects</option>
+              {loadingProjects ? (
+                <option disabled>Loading projects...</option>
+              ) : (
+                projects.map(p => (
+                  <option key={p.id} value={p.name}>{p.name}</option>
+                ))
+              )}
+            </select>
+            <small>Only show To Do tickets from this project.</small>
           </label>
 
           {testResult ? (

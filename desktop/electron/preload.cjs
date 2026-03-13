@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   chooseRepoPath: () => ipcRenderer.invoke("settings:choose-repo-path"),
   saveLinearSettings: payload => ipcRenderer.invoke("linear:save-settings", payload),
+  getLinearProjects: () => ipcRenderer.invoke("linear:get-projects"),
   getLinearTickets: () => ipcRenderer.invoke("linear:get-tickets"),
   createSessionWithTicket: payload => ipcRenderer.invoke("sessions:create-with-ticket", payload),
   listSessions: () => ipcRenderer.invoke("sessions:list"),

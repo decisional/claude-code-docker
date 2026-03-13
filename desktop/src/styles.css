@@ -1680,6 +1680,30 @@ input:focus {
   padding-top: 8px;
 }
 
+.linear-select {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.linear-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.linear-select option {
+  background: #2a2d2a;
+  color: var(--text);
+}
+
 .linear-test-ok {
   padding: 8px 12px;
   border-radius: 6px;
