@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("desktopApi", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   chooseRepoPath: () => ipcRenderer.invoke("settings:choose-repo-path"),
+  saveLinearSettings: payload => ipcRenderer.invoke("linear:save-settings", payload),
+  getLinearProjects: () => ipcRenderer.invoke("linear:get-projects"),
+  getLinearTickets: () => ipcRenderer.invoke("linear:get-tickets"),
+  createSessionWithTicket: payload => ipcRenderer.invoke("sessions:create-with-ticket", payload),
   listSessions: () => ipcRenderer.invoke("sessions:list"),
   createSession: payload => ipcRenderer.invoke("sessions:create", payload),
   attachSession: payload => ipcRenderer.invoke("sessions:attach", payload),
@@ -12,6 +16,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   sendInput: payload => ipcRenderer.invoke("sessions:input", payload),
   resizeSession: payload => ipcRenderer.invoke("sessions:resize", payload),
   readClipboardText: () => ipcRenderer.invoke("clipboard:read-text"),
+  writeClipboardText: text => ipcRenderer.invoke("clipboard:write-text", text),
   readClipboardFilePaths: () => ipcRenderer.invoke("clipboard:read-file-paths"),
   openExternal: url => ipcRenderer.invoke("shell:open-external", url),
   confirmDialog: options => ipcRenderer.invoke("dialog:confirm", options),

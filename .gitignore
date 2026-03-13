@@ -4,7 +4,9 @@ shared/
 claude-data/
 codex-data/
 git-data/
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/settings.json
 workflow-data/
 AGENTS.md
 

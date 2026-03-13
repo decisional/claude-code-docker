@@ -8,6 +8,7 @@ const EMPTY_SESSIONS = [];
 const terminalRegistry = new Map();
 const SIDEBAR_STORAGE_KEY = "autodex-desktop:sidebar-collapsed";
 const REVIEW_PANEL_STORAGE_KEY = "autodex-desktop:review-panel-open";
+const LINEAR_KEY_STORAGE_KEY = "autodex-desktop:linear-configured";
 const SIDEBAR_SHORTCUT_KEY = "b";
 
 const STATUS_LABELS = {
@@ -154,11 +155,12 @@ function SessionTerminal({ sessionId, active }) {
       cursorBlink: true,
       fontSize: 13,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      allowProposedApi: true,
       theme: {
         background: "#1a1d1a",
         foreground: "#e8e8e6",
         cursor: "#8bc48b",
-        selectionBackground: "rgba(139, 196, 139, 0.15)",
+        selectionBackground: "rgba(139, 196, 139, 0.35)",
         black: "#1a1d1a",
         brightBlack: "#4a4a46",
         white: "#e8e8e6",
@@ -188,14 +190,32 @@ function SessionTerminal({ sessionId, active }) {
     fitRef.current = fit;
     terminalRegistry.set(sessionId, terminal);
 
+    // Strip mouse-mode enable sequences so xterm.js never captures mouse
+    // events from the app (Claude Code / Codex TUI). This keeps text
+    // selection and copy working at all times.
+    const MOUSE_MODE_RE = /\x1b\[\?(?:9|1000|1002|1003|1004|1005|1006|1015|1016)h/g;
+
     const onData = window.desktopApi.onTerminalData(({ sessionId: targetSessionId, data }) => {
       if (targetSessionId === sessionId) {
-        terminal.write(data);
+        terminal.write(typeof data === "string" ? data.replace(MOUSE_MODE_RE, "") : data);
       }
     });
 
     terminal.onData(data => {
       window.desktopApi.sendInput({ sessionId, data });
+    });
+
+    // Cmd+C copies selection when text is selected, otherwise sends SIGINT
+    terminal.attachCustomKeyEventHandler(event => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "c" && event.type === "keydown") {
+        const selection = terminal.getSelection();
+        if (selection) {
+          window.desktopApi.writeClipboardText(selection);
+          terminal.clearSelection();
+          return false; // Prevent sending Ctrl+C to the terminal
+        }
+      }
+      return true;
     });
 
     const handlePaste = async event => {
@@ -340,6 +360,31 @@ function SessionStateDot({ status }) {
   return <span className={`session-state-dot status-${status || "unknown"}`} title={statusLabel(status)} />;
 }
 
+function CopyPromptButton({ prompt }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async e => {
+    e.stopPropagation();
+    await window.desktopApi.writeClipboardText(prompt);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button className={`terminal-chip copy-prompt-btn ${copied ? "copied" : ""}`} type="button" onClick={handleCopy} title="Copy ticket prompt to clipboard">
+      {copied ? (
+        <>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3 3 7-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          Copied
+        </>
+      ) : (
+        <>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.2" /><path d="M11 5V3.5A1.5 1.5 0 009.5 2h-6A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5" stroke="currentColor" strokeWidth="1.2" /></svg>
+          Copy Prompt
+        </>
+      )}
+    </button>
+  );
+}
+
 function SessionFacts({ session, className = "session-facts" }) {
   const branchDisplay = session.currentBranch || session.branch || "";
   const facts = [session.containerName, branchDisplay ? `branch ${branchDisplay}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
@@ -368,6 +413,14 @@ function SessionFacts({ session, className = "session-facts" }) {
             </span>
           ) : null}
         </>
+      ) : null}
+      {session.linearTicketId ? (
+        <span
+          className="session-fact session-linear-link"
+          onClick={() => session.linearTicketUrl && window.desktopApi.openExternal(session.linearTicketUrl)}
+        >
+          {session.linearTicketId}
+        </span>
       ) : null}
     </div>
   );
@@ -841,6 +894,342 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
   );
 }
 
+function LinearSettingsOverlay({ open, onClose, settings, onSave }) {
+  const [apiKey, setApiKey] = useState("");
+  const [project, setProject] = useState("");
+  const [projects, setProjects] = useState([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  useEffect(() => {
+    if (open) {
+      setApiKey(settings.linearApiKey || "");
+      setProject(settings.linearProject || "");
+      setTestResult(null);
+    }
+  }, [open, settings.linearApiKey, settings.linearProject]);
+
+  // Fetch projects when the overlay opens and we have a key
+  useEffect(() => {
+    if (!open || !settings.linearApiKey) return;
+    setLoadingProjects(true);
+    window.desktopApi.getLinearProjects()
+      .then(result => { setProjects(result); setLoadingProjects(false); })
+      .catch(() => setLoadingProjects(false));
+  }, [open, settings.linearApiKey]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleKeyDown = event => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const handleSave = async () => {
+    setSaving(true);
+    setTestResult(null);
+    try {
+      await onSave({ linearApiKey: apiKey.trim(), linearProject: project });
+      onClose();
+    } catch (err) {
+      setTestResult({ ok: false, message: err.message || "Failed to save." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setSaving(true);
+    setTestResult(null);
+    try {
+      // Save first, then test by fetching tickets
+      await onSave({ linearApiKey: apiKey.trim(), linearProject: project });
+      const result = await window.desktopApi.getLinearTickets();
+      setTestResult({ ok: true, message: `Connected as ${result.viewer.name} (${result.viewer.email}). Found ${result.tickets.length} To Do tickets.` });
+    } catch (err) {
+      setTestResult({ ok: false, message: err.message || "Connection failed." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="overlay-root" role="presentation" onClick={onClose}>
+      <div className="overlay-card" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+        <div className="overlay-header">
+          <div className="overlay-heading">
+            <span className="eyebrow">Settings</span>
+            <h3>Linear Integration</h3>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose}>x</button>
+        </div>
+
+        <div className="overlay-form">
+          <label className="overlay-field">
+            <span>Linear API Key</span>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              placeholder="lin_api_..."
+            />
+            <small>Generate a personal API key from Linear Settings &gt; API.</small>
+          </label>
+
+          <label className="overlay-field">
+            <span>Project Filter</span>
+            <select
+              value={project}
+              onChange={e => setProject(e.target.value)}
+              className="linear-select"
+            >
+              <option value="">All projects</option>
+              {loadingProjects ? (
+                <option disabled>Loading projects...</option>
+              ) : (
+                projects.map(p => (
+                  <option key={p.id} value={p.name}>{p.name}</option>
+                ))
+              )}
+            </select>
+            <small>Only show To Do tickets from this project.</small>
+          </label>
+
+          {testResult ? (
+            <div className={testResult.ok ? "linear-test-ok" : "error-banner"}>
+              {testResult.message}
+            </div>
+          ) : null}
+
+          <div className="overlay-footer">
+            <button className="secondary" type="button" onClick={handleTest} disabled={saving || !apiKey.trim()}>
+              {saving ? "Testing..." : "Test Connection"}
+            </button>
+            <button className="primary" type="button" onClick={handleSave} disabled={saving || !apiKey.trim()}>
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession, onOpenSettings }) {
+  const [tickets, setTickets] = useState([]);
+  const [viewer, setViewer] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [selectedRuntime, setSelectedRuntime] = useState("claude");
+  const [submitting, setSubmitting] = useState(false);
+  const submitRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    setError("");
+    setCurrentIndex(0);
+    setTickets([]);
+    setViewer(null);
+
+    window.desktopApi.getLinearTickets()
+      .then(result => {
+        setTickets(result.tickets);
+        setViewer(result.viewer);
+        setLoading(false);
+        // Auto-focus submit after tickets load
+        setTimeout(() => { if (submitRef.current) submitRef.current.focus(); }, 100);
+      })
+      .catch(err => {
+        setError(err.message || "Failed to fetch tickets.");
+        setLoading(false);
+      });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleKeyDown = event => {
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Tab toggles between Claude and Codex
+      if (event.key === "Tab") {
+        event.preventDefault();
+        setSelectedRuntime(r => (r === "claude" ? "codex" : "claude"));
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const ticket = tickets[currentIndex];
+
+  const handleSkip = () => {
+    if (currentIndex < tickets.length - 1) {
+      setCurrentIndex(i => i + 1);
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(i => i - 1);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!ticket) return;
+    setSubmitting(true);
+    try {
+      const sessionName = normalizeSessionName(ticket.identifier);
+      const ticketPayload = {
+        id: ticket.id,
+        identifier: ticket.identifier,
+        title: ticket.title,
+        description: ticket.description || "",
+        url: ticket.url,
+        comments: (ticket.comments?.nodes || []).map(c => ({
+          user: c.user?.name || "Unknown",
+          body: c.body,
+        })),
+      };
+
+      await onCreateSession({
+        runtime: selectedRuntime,
+        name: buildSuggestedSessionName(selectedRuntime, sessions, sessionName),
+        ticket: ticketPayload,
+      });
+      // Move to next ticket or close if done
+      if (currentIndex < tickets.length - 1) {
+        setCurrentIndex(i => i + 1);
+      } else {
+        onClose();
+      }
+    } catch (err) {
+      setError(err.message || "Failed to create session.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const priorityLabel = p => {
+    const labels = { 0: "No priority", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low" };
+    return labels[p] || "";
+  };
+
+  return (
+    <div className="overlay-root" role="presentation" onClick={onClose}>
+      <div className="overlay-card linear-ticket-card" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+        <div className="overlay-header">
+          <div className="overlay-heading">
+            <span className="eyebrow">Linear Pipeline {viewer ? `\u2014 ${viewer.name}` : ""}</span>
+            <h3>To Do Tickets {tickets.length > 0 ? `(${currentIndex + 1} of ${tickets.length})` : ""}</h3>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose}>x</button>
+        </div>
+
+        {loading ? (
+          <div className="linear-loading">Loading tickets from Linear...</div>
+        ) : error ? (
+          <div className="linear-error-section">
+            <div className="error-banner">{error}</div>
+            {error.includes("API key") ? (
+              <button className="primary" type="button" onClick={() => { onClose(); onOpenSettings(); }} style={{ marginTop: 12 }}>
+                Configure API Key
+              </button>
+            ) : null}
+          </div>
+        ) : tickets.length === 0 ? (
+          <div className="linear-empty">No To Do tickets found assigned to you.</div>
+        ) : ticket ? (
+          <div className="linear-ticket-content">
+            <div className="linear-ticket-header">
+              <span className="linear-ticket-id">{ticket.identifier}</span>
+              <span className={`linear-priority priority-${ticket.priority}`}>{priorityLabel(ticket.priority)}</span>
+              {ticket.labels?.nodes?.map(l => (
+                <span className="linear-label" key={l.name}>{l.name}</span>
+              ))}
+            </div>
+
+            <h4 className="linear-ticket-title">{ticket.title}</h4>
+
+            {ticket.description ? (
+              <div className="linear-ticket-desc">{ticket.description}</div>
+            ) : null}
+
+            {ticket.comments?.nodes?.length > 0 ? (
+              <div className="linear-ticket-comments">
+                <span className="linear-comments-label">Comments ({ticket.comments.nodes.length})</span>
+                {ticket.comments.nodes.slice(0, 5).map((c, i) => (
+                  <div className="linear-comment" key={i}>
+                    <span className="linear-comment-author">{c.user?.name || "Unknown"}</span>
+                    <span className="linear-comment-body">{c.body}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="linear-ticket-url">
+              <span
+                className="session-pr-link"
+                onClick={() => window.desktopApi.openExternal(ticket.url)}
+              >
+                Open in Linear
+              </span>
+            </div>
+
+            <div className="linear-runtime-pick">
+              <span className="overlay-field-label">Run with:</span>
+              <div className="runtime-picker">
+                <button
+                  className={selectedRuntime === "claude" ? "runtime-button active" : "runtime-button"}
+                  type="button"
+                  onClick={() => setSelectedRuntime("claude")}
+                >
+                  <span className="runtime-button-label">Claude</span>
+                </button>
+                <button
+                  className={selectedRuntime === "codex" ? "runtime-button active" : "runtime-button"}
+                  type="button"
+                  onClick={() => setSelectedRuntime("codex")}
+                >
+                  <span className="runtime-button-label">Codex</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="linear-ticket-actions">
+              <button className="secondary" type="button" onClick={handlePrev} disabled={currentIndex === 0}>
+                Previous
+              </button>
+              <button className="secondary" type="button" onClick={handleSkip} disabled={currentIndex >= tickets.length - 1}>
+                Skip
+              </button>
+              <button className="primary" type="button" onClick={handleSubmit} disabled={submitting || busy} ref={submitRef}>
+                {submitting ? "Starting..." : `Start ${runtimeLabel(selectedRuntime)}`}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="linear-ticket-nav">
+          <button className="secondary" type="button" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [sessions, setSessions] = useState(EMPTY_SESSIONS);
   const [settings, setSettings] = useState({ repoPath: "" });
@@ -862,6 +1251,8 @@ export default function App() {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(REVIEW_PANEL_STORAGE_KEY) === "true";
   });
+  const [showLinearSettings, setShowLinearSettings] = useState(false);
+  const [showLinearBrowser, setShowLinearBrowser] = useState(false);
   const activeSessionIdRef = useRef("");
   const sessionSignalTimersRef = useRef({});
 
@@ -1084,6 +1475,25 @@ export default function App() {
     }
   };
 
+  const handleCreateWithTicket = async payload => {
+    try {
+      setBusy(true);
+      setError("");
+      const session = await window.desktopApi.createSessionWithTicket(payload);
+      selectSession(session.id);
+    } catch (createError) {
+      setError(createError.message || "Failed to create session with ticket.");
+      throw createError;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSaveLinearSettings = async payload => {
+    const result = await window.desktopApi.saveLinearSettings(payload);
+    setSettings(result);
+  };
+
   const perform = async (action, payload, onSuccess) => {
     try {
       setBusy(true);
@@ -1228,6 +1638,20 @@ export default function App() {
                                 </>
                               ) : null}
                               {session.port ? <span>port {session.port}</span> : null}
+                              {session.linearTicketId ? (
+                                <span
+                                  className="session-linear-link"
+                                  title={`Open ${session.linearTicketId} in Linear`}
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    if (session.linearTicketUrl) {
+                                      window.desktopApi.openExternal(session.linearTicketUrl);
+                                    }
+                                  }}
+                                >
+                                  {session.linearTicketId}
+                                </span>
+                              ) : null}
                             </div>
                           </div>
 
@@ -1246,6 +1670,39 @@ export default function App() {
           </div>
 
           <div className="sidebar-footer">
+            <button
+              className="linear-pipeline-button"
+              type="button"
+              disabled={busy}
+              onClick={() => setShowLinearBrowser(true)}
+              title="Linear ticket pipeline"
+            >
+              {sidebarCollapsed ? (
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                  Linear Pipeline
+                </>
+              )}
+            </button>
+            {!sidebarCollapsed ? (
+              <button
+                className="linear-settings-link"
+                type="button"
+                onClick={() => setShowLinearSettings(true)}
+                title="Linear settings"
+              >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 10a2 2 0 100-4 2 2 0 000 4z" stroke="currentColor" strokeWidth="1.2" />
+                  <path d="M13.5 8a5.5 5.5 0 01-11 0 5.5 5.5 0 0111 0z" stroke="currentColor" strokeWidth="1.2" />
+                </svg>
+              </button>
+            ) : null}
             <button
               className="prune-button"
               type="button"
@@ -1364,6 +1821,19 @@ export default function App() {
                       </>
                     ) : null}
                     {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
+                    {activeSession.linearTicketId ? (
+                      <>
+                        <span
+                          className="terminal-chip session-linear-link"
+                          onClick={() => activeSession.linearTicketUrl && window.desktopApi.openExternal(activeSession.linearTicketUrl)}
+                        >
+                          {activeSession.linearTicketId}
+                        </span>
+                        {activeSession.linearTicketPrompt ? (
+                          <CopyPromptButton prompt={activeSession.linearTicketPrompt} />
+                        ) : null}
+                      </>
+                    ) : null}
                     <button
                       className={`terminal-chip review-toggle ${reviewPanelOpen ? "active" : ""}`}
                       type="button"
@@ -1412,6 +1882,22 @@ export default function App() {
         onClose={() => setShowComposer(false)}
         onCreate={handleCreate}
         defaultRuntime={composerRuntime}
+      />
+
+      <LinearSettingsOverlay
+        open={showLinearSettings}
+        onClose={() => setShowLinearSettings(false)}
+        settings={settings}
+        onSave={handleSaveLinearSettings}
+      />
+
+      <LinearTicketBrowser
+        open={showLinearBrowser}
+        onClose={() => setShowLinearBrowser(false)}
+        sessions={sessions}
+        busy={busy}
+        onCreateSession={handleCreateWithTicket}
+        onOpenSettings={() => setShowLinearSettings(true)}
       />
     </>
   );
