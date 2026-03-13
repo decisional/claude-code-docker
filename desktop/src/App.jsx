@@ -983,7 +983,7 @@ function LinearSettingsOverlay({ open, onClose, settings, onSave }) {
   );
 }
 
-function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession }) {
+function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession, onOpenSettings }) {
   const [tickets, setTickets] = useState([]);
   const [viewer, setViewer] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1091,7 +1091,14 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession })
         {loading ? (
           <div className="linear-loading">Loading tickets from Linear...</div>
         ) : error ? (
-          <div className="error-banner">{error}</div>
+          <div className="linear-error-section">
+            <div className="error-banner">{error}</div>
+            {error.includes("API key") ? (
+              <button className="primary" type="button" onClick={() => { onClose(); onOpenSettings(); }} style={{ marginTop: 12 }}>
+                Configure API Key
+              </button>
+            ) : null}
+          </div>
         ) : tickets.length === 0 ? (
           <div className="linear-empty">No To Do tickets found assigned to you.</div>
         ) : ticket ? (
@@ -1619,13 +1626,7 @@ export default function App() {
               className="linear-pipeline-button"
               type="button"
               disabled={busy}
-              onClick={() => {
-                if (settings.linearApiKey) {
-                  setShowLinearBrowser(true);
-                } else {
-                  setShowLinearSettings(true);
-                }
-              }}
+              onClick={() => setShowLinearBrowser(true)}
               title="Linear ticket pipeline"
             >
               {sidebarCollapsed ? (
@@ -1641,7 +1642,7 @@ export default function App() {
                 </>
               )}
             </button>
-            {!sidebarCollapsed && settings.linearApiKey ? (
+            {!sidebarCollapsed ? (
               <button
                 className="linear-settings-link"
                 type="button"
@@ -1848,6 +1849,7 @@ export default function App() {
         sessions={sessions}
         busy={busy}
         onCreateSession={handleCreateWithTicket}
+        onOpenSettings={() => setShowLinearSettings(true)}
       />
     </>
   );
