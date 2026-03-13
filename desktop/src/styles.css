@@ -473,9 +473,10 @@ input:focus {
   border: 1px solid var(--line-strong);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-dim);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+}
+
+.session-avatar svg {
+  display: block;
 }
 
 .session-avatar.runtime-claude {

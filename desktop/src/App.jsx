@@ -653,7 +653,20 @@ function SessionSignal({ state }) {
 }
 
 function SessionAvatar({ session }) {
-  return <span className={`session-avatar runtime-${session.runtime}`}>{sessionMonogram(session.name)}</span>;
+  return (
+    <span className={`session-avatar runtime-${session.runtime}`}>
+      {session.runtime === "codex" ? (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M5 4l-3 4 3 4M11 4l3 4-3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ) : (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M4 12l3-4-3-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M8.5 12h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      )}
+    </span>
+  );
 }
 
 function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, defaultRuntime }) {
