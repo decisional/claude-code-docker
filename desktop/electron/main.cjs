@@ -717,6 +717,7 @@ async function fetchLinearTodoTickets(apiKey) {
         filter: {
           assignee: { id: { eq: $userId } }
           state: { type: { eq: "unstarted" } }
+          project: { name: { eq: "Autodex - Product Roadmap" } }
         }
         orderBy: updatedAt
         first: 50
