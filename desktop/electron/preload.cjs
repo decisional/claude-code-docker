@@ -3,6 +3,9 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("desktopApi", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   chooseRepoPath: () => ipcRenderer.invoke("settings:choose-repo-path"),
+  saveLinearSettings: payload => ipcRenderer.invoke("linear:save-settings", payload),
+  getLinearTickets: () => ipcRenderer.invoke("linear:get-tickets"),
+  createSessionWithTicket: payload => ipcRenderer.invoke("sessions:create-with-ticket", payload),
   listSessions: () => ipcRenderer.invoke("sessions:list"),
   createSession: payload => ipcRenderer.invoke("sessions:create", payload),
   attachSession: payload => ipcRenderer.invoke("sessions:attach", payload),

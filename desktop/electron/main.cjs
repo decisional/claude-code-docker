@@ -3,6 +3,7 @@ const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
 const { fileURLToPath } = require("url");
+const https = require("https");
 const { execFile, spawn } = require("child_process");
 const pty = require("node-pty");
 
@@ -10,6 +11,9 @@ const liveSessions = new Map();
 const notificationCooldowns = new Map();
 // Cache PR lookups per session: sessionId -> { branch, prNumber, prUrl }
 const prCache = new Map();
+// Queue initial messages to send once a session's prompt is detected
+// sessionId -> { message, promptDetected, buffer }
+const initialMessageQueue = new Map();
 let mainWindow = null;
 let storePath = "";
 let appState = {
@@ -43,6 +47,7 @@ function createDefaultState() {
   return {
     settings: {
       repoPath: path.resolve(__dirname, "..", ".."),
+      linearApiKey: "",
     },
     sessions: [],
   };
@@ -552,6 +557,22 @@ async function startInteractiveSession(session, mode = "start", size = { cols: 1
   term.onData(data => {
     emit("terminal:data", { sessionId: session.id, data });
 
+    // Detect prompt readiness and send queued initial message
+    const queued = initialMessageQueue.get(session.id);
+    if (queued && !queued.promptDetected) {
+      queued.buffer += data;
+      // Claude Code prompt: ❯  |  Codex prompt: ›
+      // Also detect ">" as fallback for plain prompts
+      if (/[❯›]\s*$/.test(queued.buffer) || /\n>\s*$/.test(queued.buffer)) {
+        queued.promptDetected = true;
+        // Small delay to ensure the prompt is fully rendered
+        setTimeout(() => {
+          term.write(queued.message + "\r");
+          initialMessageQueue.delete(session.id);
+        }, 500);
+      }
+    }
+
     if (!mainWindow?.isFocused()) {
       notifyIfHidden(session.name, "Session received output.", {
         cooldownKey: `session-output:${session.id}`,
@@ -652,6 +673,157 @@ function validateRepoPath(repoPath) {
   return Promise.all(requiredScripts.map(script => fs.access(path.join(repoPath, script))))
     .then(() => true)
     .catch(() => false);
+}
+
+// ── Linear API ──
+
+function linearGraphQL(apiKey, query, variables = {}) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ query, variables });
+    const req = https.request(
+      {
+        hostname: "api.linear.app",
+        path: "/graphql",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: apiKey,
+          "Content-Length": Buffer.byteLength(body),
+        },
+      },
+      res => {
+        let data = "";
+        res.on("data", chunk => {
+          data += chunk;
+        });
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.errors && parsed.errors.length > 0) {
+              reject(new Error(parsed.errors[0].message));
+            } else {
+              resolve(parsed.data);
+            }
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+    );
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function fetchLinearTodoTickets(apiKey) {
+  const query = `
+    query {
+      viewer {
+        id
+        name
+        email
+      }
+    }
+  `;
+  const viewerData = await linearGraphQL(apiKey, query);
+  const viewerId = viewerData.viewer.id;
+
+  const ticketsQuery = `
+    query($userId: ID!) {
+      issues(
+        filter: {
+          assignee: { id: { eq: $userId } }
+          state: { type: { eq: "unstarted" } }
+        }
+        orderBy: updatedAt
+        first: 50
+      ) {
+        nodes {
+          id
+          identifier
+          title
+          description
+          url
+          priority
+          state {
+            name
+            type
+          }
+          labels {
+            nodes {
+              name
+            }
+          }
+          comments {
+            nodes {
+              body
+              user {
+                name
+              }
+              createdAt
+            }
+          }
+        }
+      }
+    }
+  `;
+  const ticketsData = await linearGraphQL(apiKey, ticketsQuery, { userId: viewerId });
+  return {
+    viewer: viewerData.viewer,
+    tickets: ticketsData.issues.nodes,
+  };
+}
+
+async function moveLinearTicketToInProgress(apiKey, ticketId) {
+  if (!apiKey || !ticketId) return;
+  try {
+    // First, find the "In Progress" state for this issue's team
+    const issueData = await linearGraphQL(apiKey, `
+      query($id: String!) {
+        issue(id: $id) {
+          team {
+            states {
+              nodes {
+                id
+                name
+                type
+              }
+            }
+          }
+        }
+      }
+    `, { id: ticketId });
+
+    const states = issueData.issue?.team?.states?.nodes || [];
+    const inProgressState = states.find(s => s.type === "started") || states.find(s => s.name.toLowerCase().includes("progress"));
+    if (!inProgressState) return;
+
+    await linearGraphQL(apiKey, `
+      mutation($id: String!, $stateId: String!) {
+        issueUpdate(id: $id, input: { stateId: $stateId }) {
+          success
+        }
+      }
+    `, { id: ticketId, stateId: inProgressState.id });
+  } catch {
+    // Non-fatal — don't block session creation if status update fails.
+  }
+}
+
+async function injectLinearKeyIntoContainer(containerName, apiKey) {
+  if (!apiKey || !containerName) return;
+  try {
+    await runCommand("docker", [
+      "exec",
+      containerName,
+      "bash",
+      "-c",
+      `echo 'export LINEAR_API_KEY="${apiKey}"' >> /home/node/.bashrc && echo '${apiKey}' > /home/node/.linear-api-key && chmod 600 /home/node/.linear-api-key`,
+    ]);
+  } catch {
+    // Non-fatal — container may not be ready yet.
+  }
 }
 
 app.whenReady().then(async () => {
@@ -903,6 +1075,95 @@ ipcMain.handle("dialog:confirm", async (_event, options) => {
 ipcMain.handle("docker:prune", async () => {
   const { stdout } = await runCommand("docker", ["system", "prune", "-f"]);
   return stdout.trim();
+});
+
+ipcMain.handle("linear:save-settings", async (_event, payload) => {
+  await ensureStateLoaded();
+  if (payload.linearApiKey !== undefined) {
+    appState.settings.linearApiKey = payload.linearApiKey;
+  }
+  await persistState();
+  return appState.settings;
+});
+
+ipcMain.handle("linear:get-tickets", async () => {
+  await ensureStateLoaded();
+  const apiKey = appState.settings.linearApiKey;
+  if (!apiKey) {
+    throw new Error("Linear API key not configured. Please add it in Settings.");
+  }
+  return fetchLinearTodoTickets(apiKey);
+});
+
+ipcMain.handle("sessions:create-with-ticket", async (_event, payload) => {
+  await ensureStateLoaded();
+  const name = String(payload.name || "").trim();
+  const runtime = payload.runtime === "codex" ? "codex" : "claude";
+  const branch = String(payload.branch || "").trim();
+  const port = String(payload.port || "").trim();
+  const ticket = payload.ticket;
+
+  if (!name) {
+    throw new Error("Session name is required.");
+  }
+
+  const session = {
+    id: buildSessionId(runtime, name),
+    name,
+    runtime,
+    branch,
+    port,
+    projectName: buildProjectName(runtime, name),
+    containerName: buildContainerName(runtime, name),
+    status: "starting",
+    dockerStatus: "Starting...",
+    createdAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+    linearTicketId: ticket?.identifier || "",
+    linearTicketUrl: ticket?.url || "",
+  };
+
+  upsertSession(session);
+  await persistState();
+
+  // Build the initial message to send to the LLM
+  if (ticket) {
+    let ticketMessage = `Pick up Linear ticket ${ticket.identifier}: ${ticket.title}\n\nURL: ${ticket.url}`;
+    if (ticket.description) {
+      ticketMessage += `\n\nDescription:\n${ticket.description}`;
+    }
+    if (ticket.comments && ticket.comments.length > 0) {
+      ticketMessage += "\n\nComments:";
+      for (const comment of ticket.comments) {
+        ticketMessage += `\n- ${comment.user}: ${comment.body}`;
+      }
+    }
+    ticketMessage += "\n\nPlease read the full ticket using the /linear skill if available, then start working on it.";
+
+    initialMessageQueue.set(session.id, {
+      message: ticketMessage,
+      promptDetected: false,
+      buffer: "",
+    });
+  }
+
+  await startInteractiveSession(session, "start", payload.size || undefined);
+
+  // Inject Linear API key into the container and move ticket to In Progress
+  const apiKey = appState.settings.linearApiKey;
+  if (apiKey) {
+    // Wait a moment for the container to be fully ready
+    setTimeout(() => {
+      injectLinearKeyIntoContainer(session.containerName, apiKey);
+    }, 5000);
+
+    // Move ticket to In Progress in Linear
+    if (ticket && ticket.id) {
+      moveLinearTicketToInProgress(apiKey, ticket.id).catch(() => {});
+    }
+  }
+
+  return getSessionById(session.id);
 });
 
 ipcMain.handle("sessions:stop", async (_event, payload) => {
