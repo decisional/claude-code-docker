@@ -234,6 +234,13 @@ function SessionTerminal({ sessionId, active }) {
       event.preventDefault();
 
       try {
+        // Check for an image in the clipboard (e.g. screenshot Cmd+V)
+        const imagePath = await window.desktopApi.readClipboardImage(sessionId);
+        if (imagePath) {
+          window.desktopApi.sendInput({ sessionId, data: formatPathsForTerminal([imagePath]) });
+          return;
+        }
+
         const clipboardText = await window.desktopApi.readClipboardText();
         if (clipboardText) {
           const textPaths = clipboardPathsFromText(clipboardText);
