@@ -154,10 +154,26 @@ function SessionTerminal({ sessionId, active }) {
       fontSize: 13,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       theme: {
-        background: "#0d1017",
-        foreground: "#edf2f7",
-        cursor: "#f7fafc",
-        selectionBackground: "#243244",
+        background: "#1a1d1a",
+        foreground: "#e8e8e6",
+        cursor: "#8bc48b",
+        selectionBackground: "rgba(139, 196, 139, 0.15)",
+        black: "#1a1d1a",
+        brightBlack: "#4a4a46",
+        white: "#e8e8e6",
+        brightWhite: "#f5f5f3",
+        green: "#8bc48b",
+        brightGreen: "#6db86d",
+        yellow: "#d4a843",
+        brightYellow: "#e0be6a",
+        red: "#d46a6a",
+        brightRed: "#e08888",
+        blue: "#60a5fa",
+        brightBlue: "#93c5fd",
+        cyan: "#5eead4",
+        brightCyan: "#99f6e4",
+        magenta: "#c084fc",
+        brightMagenta: "#d8b4fe",
       },
       scrollback: 10000,
       allowTransparency: false,
@@ -335,12 +351,22 @@ function SessionFacts({ session, className = "session-facts" }) {
         </span>
       ))}
       {session.prNumber ? (
-        <span
-          className="session-fact session-pr-link"
-          onClick={() => window.desktopApi.openExternal(session.prUrl)}
-        >
-          PR #{session.prNumber}
-        </span>
+        <>
+          <span
+            className="session-fact session-pr-link"
+            onClick={() => window.desktopApi.openExternal(session.prUrl)}
+          >
+            PR #{session.prNumber}
+          </span>
+          {session.repoSlug ? (
+            <span
+              className="session-fact session-pr-link devin-link"
+              onClick={() => window.desktopApi.openExternal(`https://app.devin.ai/review/${session.repoSlug}/pull/${session.prNumber}`)}
+            >
+              Devin
+            </span>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
@@ -358,7 +384,7 @@ function SessionSignal({ state }) {
   }
 
   if (state === "attention") {
-    return <span className="session-signal attention">New output</span>;
+    return <span className="session-signal attention">Needs review</span>;
   }
 
   return null;
@@ -792,48 +818,47 @@ export default function App() {
       <div className={sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
         <aside className="sidebar">
           <div className="sidebar-top">
-            <div className="sidebar-chrome">
-              <div className="sidebar-brand">
-                <div className="brand-mark" />
-                {!sidebarCollapsed ? (
-                  <div className="brand-copy">
-                    <span className="eyebrow">Autodex desktop</span>
-                    <h1>Sessions</h1>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="sidebar-actions">
-                <button className="icon-button strong" type="button" onClick={() => setShowComposer(true)} title="Start session">
-                  +
-                </button>
-                <button
-                  className="icon-button"
-                  type="button"
-                  onClick={() => setSidebarCollapsed(current => !current)}
-                  title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-                >
-                  {sidebarCollapsed ? ">" : "<"}
-                </button>
-              </div>
-            </div>
-
             {!sidebarCollapsed ? (
-              <div className="sidebar-meta">
-                <span className="meta-pill">{sessions.length} total</span>
-                <span className="meta-pill">{liveSessionCount} live</span>
+              <div className="sidebar-chrome">
+                <button
+                  className="icon-button collapse-toggle"
+                  type="button"
+                  onClick={() => setSidebarCollapsed(true)}
+                  title="Collapse sidebar (Cmd+B)"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <h1 className="sidebar-title">Sessions</h1>
+                <button className="icon-button new-session-btn" type="button" onClick={() => setShowComposer(true)} title="New session (Cmd+N)">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
               </div>
             ) : (
-              <div className="sidebar-meta compact">
-                <span className="meta-pill compact" title={`${sessions.length} sessions`}>
-                  {sessions.length}
-                </span>
+              <div className="sidebar-chrome compact">
+                <button
+                  className="icon-button collapse-toggle"
+                  type="button"
+                  onClick={() => setSidebarCollapsed(false)}
+                  title="Expand sidebar (Cmd+B)"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <button className="icon-button new-session-btn" type="button" onClick={() => setShowComposer(true)} title="New session (Cmd+N)">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
               </div>
             )}
           </div>
 
           <div className="session-list-panel">
-            {!sidebarCollapsed ? <div className="section-label">Recent sessions</div> : null}
 
             <div className="session-list">
               {sessions.length === 0 ? (
@@ -845,7 +870,12 @@ export default function App() {
 
               {sessions.map(session => (
                 <button
-                  className={session.id === activeSessionId ? "session-item active" : "session-item"}
+                  className={[
+                    "session-item",
+                    session.id === activeSessionId && "active",
+                    sessionSignals[session.id] === "attention" && "attention",
+                    sessionSignals[session.id] === "running" && "has-output",
+                  ].filter(Boolean).join(" ")}
                   key={session.id}
                   title={sessionTitle(session)}
                   type="button"
@@ -868,16 +898,30 @@ export default function App() {
                                 <span title="Current git branch">{session.currentBranch || session.branch}</span>
                               ) : null}
                               {session.prNumber ? (
-                                <span
-                                  className="session-pr-link"
-                                  title={`Open PR #${session.prNumber}`}
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    window.desktopApi.openExternal(session.prUrl);
-                                  }}
-                                >
-                                  PR #{session.prNumber}
-                                </span>
+                                <>
+                                  <span
+                                    className="session-pr-link"
+                                    title={`Open PR #${session.prNumber}`}
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      window.desktopApi.openExternal(session.prUrl);
+                                    }}
+                                  >
+                                    PR #{session.prNumber}
+                                  </span>
+                                  {session.repoSlug ? (
+                                    <span
+                                      className="session-pr-link devin-link"
+                                      title="Open in Devin"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        window.desktopApi.openExternal(`https://app.devin.ai/review/${session.repoSlug}/pull/${session.prNumber}`);
+                                      }}
+                                    >
+                                      Devin
+                                    </span>
+                                  ) : null}
+                                </>
                               ) : null}
                               {session.port ? <span>port {session.port}</span> : null}
                             </div>
@@ -998,12 +1042,22 @@ export default function App() {
                   <div className="terminal-toolbar-aside">
                     {(activeSession.currentBranch || activeSession.branch) ? <span className="terminal-chip">branch {activeSession.currentBranch || activeSession.branch}</span> : null}
                     {activeSession.prNumber ? (
-                      <span
-                        className="terminal-chip session-pr-link"
-                        onClick={() => window.desktopApi.openExternal(activeSession.prUrl)}
-                      >
-                        PR #{activeSession.prNumber}
-                      </span>
+                      <>
+                        <span
+                          className="terminal-chip session-pr-link"
+                          onClick={() => window.desktopApi.openExternal(activeSession.prUrl)}
+                        >
+                          PR #{activeSession.prNumber}
+                        </span>
+                        {activeSession.repoSlug ? (
+                          <span
+                            className="terminal-chip session-pr-link devin-link"
+                            onClick={() => window.desktopApi.openExternal(`https://app.devin.ai/review/${activeSession.repoSlug}/pull/${activeSession.prNumber}`)}
+                          >
+                            Devin
+                          </span>
+                        ) : null}
+                      </>
                     ) : null}
                     {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
                   </div>
