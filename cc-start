@@ -97,7 +97,7 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     # Copy skills from repo if they exist
     if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
         echo "  Copying skills..."
-        docker cp "$SCRIPT_DIR/.claude/skills" "${CONTAINER_NAME}:/home/node/.claude/skills"
+        docker cp "$SCRIPT_DIR/.claude/skills/." "${CONTAINER_NAME}:/home/node/.claude/skills/"
     fi
 
     # Copy settings.json from repo if it exists
@@ -180,7 +180,7 @@ else
     # Copy skills from repo if they exist
     if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
         echo "  Copying skills..."
-        docker cp "$SCRIPT_DIR/.claude/skills" "${CONTAINER_NAME}:/home/node/.claude/skills" 2>/dev/null || echo "  (Could not copy skills, continuing anyway...)"
+        docker cp "$SCRIPT_DIR/.claude/skills/." "${CONTAINER_NAME}:/home/node/.claude/skills/" 2>/dev/null || echo "  (Could not copy skills, continuing anyway...)"
     fi
 
     # Copy settings.json from repo if it exists

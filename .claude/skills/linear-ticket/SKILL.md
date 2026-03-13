@@ -1,5 +1,5 @@
 ---
-name: linear
+name: linear-ticket
 description: Read and work on a Linear ticket. Fetches ticket details, comments, and related context from Linear's API.
 user_invocable: true
 ---

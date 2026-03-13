@@ -88,6 +88,13 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         docker cp "$HOME/.openai" "${CONTAINER_NAME}:/home/node/.openai" 2>/dev/null || true
     fi
 
+    # Copy skills from repo if they exist
+    if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
+        echo "  Copying skills..."
+        docker-compose -p "$PROJECT_NAME" exec -T codex-cli mkdir -p /home/node/.claude/skills
+        docker cp "$SCRIPT_DIR/.claude/skills/." "${CONTAINER_NAME}:/home/node/.claude/skills/"
+    fi
+
     # Copy project .env file if it exists
     ENV_SOURCE="${PROJECT_ENV_FILE:-$SCRIPT_DIR/project.env}"
     if [ -f "$ENV_SOURCE" ]; then
@@ -156,6 +163,12 @@ else
         echo "  Copying OpenAI configuration..."
         sleep 1  # Wait for container to be fully ready
         docker cp "$HOME/.openai" "${CONTAINER_NAME}:/home/node/.openai" 2>/dev/null || echo "  (Could not copy OpenAI config, continuing anyway...)"
+    fi
+
+    # Copy skills from repo if they exist
+    if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
+        echo "  Copying skills..."
+        docker cp "$SCRIPT_DIR/.claude/skills/." "${CONTAINER_NAME}:/home/node/.claude/skills/" 2>/dev/null || echo "  (Could not copy skills, continuing anyway...)"
     fi
 
     # Copy project .env file if it exists
