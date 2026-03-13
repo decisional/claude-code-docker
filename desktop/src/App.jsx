@@ -29,15 +29,6 @@ function statusLabel(status) {
   return STATUS_LABELS[status] || status || "Unknown";
 }
 
-function repoNameFromPath(repoPath) {
-  if (!repoPath) {
-    return "Choose repository";
-  }
-
-  const parts = repoPath.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] || repoPath;
-}
-
 function normalizeSessionName(value) {
   return String(value || "")
     .trim()
@@ -790,22 +781,6 @@ export default function App() {
     }
   };
 
-  const chooseRepo = async () => {
-    try {
-      setBusy(true);
-      setError("");
-      const nextSettings = await window.desktopApi.chooseRepoPath();
-      if (nextSettings) {
-        setSettings(nextSettings);
-      }
-    } catch (chooseError) {
-      setError(chooseError.message || "Could not update repository path.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const repoName = repoNameFromPath(settings.repoPath);
   const liveSessionCount = sessions.filter(session => ["attached", "running", "starting"].includes(session.status)).length;
 
   if (loading) {
@@ -844,28 +819,12 @@ export default function App() {
             </div>
 
             {!sidebarCollapsed ? (
-              <>
-                <div className="workspace-card">
-                  <div className="workspace-copy">
-                    <span className="repo-label">Workspace</span>
-                    <span className="repo-name">{repoName}</span>
-                    <span className="repo-path">{settings.repoPath || "Choose the claude-code-docker repository"}</span>
-                  </div>
-                  <button className="repo-button" type="button" onClick={chooseRepo}>
-                    Change
-                  </button>
-                </div>
-
-                <div className="sidebar-meta">
-                  <span className="meta-pill">{sessions.length} total</span>
-                  <span className="meta-pill">{liveSessionCount} live</span>
-                </div>
-              </>
+              <div className="sidebar-meta">
+                <span className="meta-pill">{sessions.length} total</span>
+                <span className="meta-pill">{liveSessionCount} live</span>
+              </div>
             ) : (
               <div className="sidebar-meta compact">
-                <button className="repo-button compact" type="button" onClick={chooseRepo} title="Change repository">
-                  Repo
-                </button>
                 <span className="meta-pill compact" title={`${sessions.length} sessions`}>
                   {sessions.length}
                 </span>
@@ -959,17 +918,12 @@ export default function App() {
                     <StatusBadge session={activeSession} />
                     <span className="header-divider" />
                     <span>{activeSession.dockerStatus || "Ready"}</span>
-                    <span className="header-divider" />
-                    <span className="header-path">{settings.repoPath || "Repository not selected"}</span>
                   </div>
 
                   <SessionFacts session={activeSession} className="session-facts detail-facts" />
                 </div>
 
                 <div className="action-row">
-                  <button className="secondary" type="button" onClick={chooseRepo} disabled={busy}>
-                    Repo
-                  </button>
                   <button
                     className="secondary"
                     type="button"
@@ -1042,9 +996,6 @@ export default function App() {
                 <div className="empty-actions">
                   <button className="primary" type="button" onClick={() => setShowComposer(true)}>
                     Start session
-                  </button>
-                  <button className="secondary" type="button" onClick={chooseRepo}>
-                    Choose repo
                   </button>
                 </div>
               </div>
