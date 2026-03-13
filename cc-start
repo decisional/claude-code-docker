@@ -16,6 +16,26 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
+"$SCRIPT_DIR/scripts/sync-shared-agents.sh"
+
+get_repo_dir() {
+    if [ -n "$GIT_CLONE_DIR" ]; then
+        echo "$GIT_CLONE_DIR"
+    elif [ -n "$GIT_REPO_URL" ]; then
+        basename "$GIT_REPO_URL" .git
+    fi
+}
+
+install_shared_agents() {
+    local repo_dir
+    repo_dir="$(get_repo_dir)"
+    if [ -z "$repo_dir" ]; then
+        return
+    fi
+
+    "$SCRIPT_DIR/scripts/install-shared-agents.sh" "$CONTAINER_NAME" "/workspace/$repo_dir"
+}
+
 # Parse arguments
 INSTANCE_NAME=""
 GIT_BRANCH_OVERRIDE=""
@@ -109,11 +129,7 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     # Copy project .env file if PROJECT_ENV_FILE path is configured in .env
     if [ -n "$PROJECT_ENV_FILE" ] && [ -f "$PROJECT_ENV_FILE" ]; then
         # Determine destination inside container
-        if [ -n "$GIT_CLONE_DIR" ]; then
-            REPO_DIR="$GIT_CLONE_DIR"
-        elif [ -n "$GIT_REPO_URL" ]; then
-            REPO_DIR=$(basename "$GIT_REPO_URL" .git)
-        fi
+        REPO_DIR="$(get_repo_dir)"
         if [ -n "$REPO_DIR" ]; then
             ENV_DEST_DIR="${PROJECT_ENV_DEST:-$NPM_INSTALL_DIR}"
             if [ -n "$ENV_DEST_DIR" ]; then
@@ -126,6 +142,8 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
             cat "$PROJECT_ENV_FILE" | docker exec -i "${CONTAINER_NAME}" tee "$ENV_DEST" > /dev/null
         fi
     fi
+
+    install_shared_agents
 
     echo "  Connecting to existing instance..."
     echo ""
@@ -191,11 +209,7 @@ else
 
     # Copy project .env file if PROJECT_ENV_FILE path is configured in .env
     if [ -n "$PROJECT_ENV_FILE" ] && [ -f "$PROJECT_ENV_FILE" ]; then
-        if [ -n "$GIT_CLONE_DIR" ]; then
-            REPO_DIR="$GIT_CLONE_DIR"
-        elif [ -n "$GIT_REPO_URL" ]; then
-            REPO_DIR=$(basename "$GIT_REPO_URL" .git)
-        fi
+        REPO_DIR="$(get_repo_dir)"
         if [ -n "$REPO_DIR" ]; then
             ENV_DEST_DIR="${PROJECT_ENV_DEST:-$NPM_INSTALL_DIR}"
             if [ -n "$ENV_DEST_DIR" ]; then
@@ -208,6 +222,8 @@ else
             cat "$PROJECT_ENV_FILE" | docker exec -i "${CONTAINER_NAME}" tee "$ENV_DEST" > /dev/null
         fi
     fi
+
+    install_shared_agents
 
     echo "  Launching Claude Code..."
     echo ""
