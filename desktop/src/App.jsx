@@ -792,48 +792,23 @@ export default function App() {
       <div className={sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
         <aside className="sidebar">
           <div className="sidebar-top">
-            <div className="sidebar-chrome">
-              <div className="sidebar-brand">
-                <div className="brand-mark" />
-                {!sidebarCollapsed ? (
-                  <div className="brand-copy">
-                    <span className="eyebrow">Autodex desktop</span>
-                    <h1>Sessions</h1>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="sidebar-actions">
-                <button className="icon-button strong" type="button" onClick={() => setShowComposer(true)} title="Start session">
+            {!sidebarCollapsed ? (
+              <div className="sidebar-chrome">
+                <h1 className="sidebar-title">Sessions</h1>
+                <button className="icon-button strong" type="button" onClick={() => setShowComposer(true)} title="New session (Cmd+N)">
                   +
                 </button>
-                <button
-                  className="icon-button"
-                  type="button"
-                  onClick={() => setSidebarCollapsed(current => !current)}
-                  title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-                >
-                  {sidebarCollapsed ? ">" : "<"}
-                </button>
-              </div>
-            </div>
-
-            {!sidebarCollapsed ? (
-              <div className="sidebar-meta">
-                <span className="meta-pill">{sessions.length} total</span>
-                <span className="meta-pill">{liveSessionCount} live</span>
               </div>
             ) : (
-              <div className="sidebar-meta compact">
-                <span className="meta-pill compact" title={`${sessions.length} sessions`}>
-                  {sessions.length}
-                </span>
+              <div className="sidebar-chrome compact">
+                <button className="icon-button strong" type="button" onClick={() => setShowComposer(true)} title="New session (Cmd+N)">
+                  +
+                </button>
               </div>
             )}
           </div>
 
           <div className="session-list-panel">
-            {!sidebarCollapsed ? <div className="section-label">Recent sessions</div> : null}
 
             <div className="session-list">
               {sessions.length === 0 ? (
