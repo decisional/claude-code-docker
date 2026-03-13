@@ -251,6 +251,96 @@ async function getContainerGitInfo(containerName) {
   }
 }
 
+// Patterns to skip when extracting thread titles from tmux output.
+// These are setup prompts, menu selections, and other non-task text.
+const THREAD_TITLE_SKIP_RE = /^(hi|hello|hey|yes|no|quit|exit|\d+\.\s|find and fix a bug in @)/i;
+
+async function getContainerThreadTitle(containerName) {
+  try {
+    // Capture the tmux scrollback from the container's llm-session pane.
+    // Parse user prompts (lines starting with ❯ or ›) and return the first
+    // substantive one (>10 chars, skipping greetings and setup prompts).
+    const { stdout } = await runCommand("docker", [
+      "exec",
+      containerName,
+      "bash",
+      "-c",
+      `tmux capture-pane -t llm-session -p -S -500 2>/dev/null`,
+    ]);
+
+    const lines = stdout.split("\n");
+    for (const line of lines) {
+      // Claude Code uses ❯, Codex uses ›
+      const promptMatch = line.match(/^[❯›]\s+(.+)$/);
+      if (!promptMatch) continue;
+
+      let text = promptMatch[1].trim();
+      if (text.length <= 10) continue;
+      if (THREAD_TITLE_SKIP_RE.test(text)) continue;
+
+      // Truncate at first sentence boundary or 120 chars
+      for (const sep of [". ", "\n"]) {
+        const idx = text.indexOf(sep);
+        if (idx > 0 && idx < 120) {
+          text = text.slice(0, idx);
+          break;
+        }
+      }
+
+      return text.slice(0, 60);
+    }
+
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+async function getContainerDiffStats(containerName) {
+  try {
+    const { stdout } = await runCommand("docker", [
+      "exec",
+      containerName,
+      "bash",
+      "-c",
+      'cd /workspace/*/ 2>/dev/null && git diff main --numstat 2>/dev/null || git diff HEAD --numstat 2>/dev/null || echo ""',
+    ]);
+    const lines = stdout.trim().split("\n").filter(Boolean);
+    let totalAdditions = 0;
+    let totalDeletions = 0;
+    const files = [];
+    for (const line of lines) {
+      const parts = line.split("\t");
+      if (parts.length < 3) continue;
+      const additions = parts[0] === "-" ? 0 : parseInt(parts[0], 10) || 0;
+      const deletions = parts[1] === "-" ? 0 : parseInt(parts[1], 10) || 0;
+      const filePath = parts.slice(2).join("\t");
+      totalAdditions += additions;
+      totalDeletions += deletions;
+      files.push({ path: filePath, additions, deletions });
+    }
+    return { totalAdditions, totalDeletions, files };
+  } catch {
+    return { totalAdditions: 0, totalDeletions: 0, files: [] };
+  }
+}
+
+async function getContainerDiff(containerName, filePath) {
+  try {
+    const fileArg = filePath ? `-- ${filePath}` : "";
+    const { stdout } = await runCommand("docker", [
+      "exec",
+      containerName,
+      "bash",
+      "-c",
+      `cd /workspace/*/ 2>/dev/null && git diff main ${fileArg} 2>/dev/null || git diff HEAD ${fileArg} 2>/dev/null || echo ""`,
+    ]);
+    return stdout;
+  } catch {
+    return "";
+  }
+}
+
 async function getPrForBranch(repoSlug, branch) {
   if (!repoSlug || !branch || branch === "main" || branch === "master") {
     return null;
@@ -340,6 +430,16 @@ async function refreshSessionsFromDocker() {
         session.prNumber = pr ? pr.number : null;
         session.prUrl = pr ? pr.url : null;
         prCache.set(session.id, { branch, prNumber: session.prNumber, prUrl: session.prUrl });
+      }
+
+      // Also fetch diff stats for sidebar +/- counts
+      const diffStats = await getContainerDiffStats(session.containerName);
+      session.diffStats = diffStats;
+
+      // Extract thread title from the active Claude Code conversation
+      const threadTitle = await getContainerThreadTitle(session.containerName);
+      if (threadTitle) {
+        session.threadTitle = threadTitle;
       }
     }
   });
@@ -742,6 +842,22 @@ ipcMain.handle("sessions:resize", async (_event, payload) => {
   }
   live.term.resize(Math.max(40, payload.cols || 120), Math.max(12, payload.rows || 32));
   return true;
+});
+
+ipcMain.handle("sessions:get-diff-files", async (_event, payload) => {
+  const session = getSessionById(payload.sessionId);
+  if (!session || !session.containerName) {
+    return { totalAdditions: 0, totalDeletions: 0, files: [] };
+  }
+  return getContainerDiffStats(session.containerName);
+});
+
+ipcMain.handle("sessions:get-file-diff", async (_event, payload) => {
+  const session = getSessionById(payload.sessionId);
+  if (!session || !session.containerName) {
+    return "";
+  }
+  return getContainerDiff(session.containerName, payload.filePath || "");
 });
 
 ipcMain.handle("clipboard:read-text", async () => clipboard.readText());

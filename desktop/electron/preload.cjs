@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
   openExternal: url => ipcRenderer.invoke("shell:open-external", url),
   confirmDialog: options => ipcRenderer.invoke("dialog:confirm", options),
   dockerPrune: () => ipcRenderer.invoke("docker:prune"),
+  getDiffFiles: payload => ipcRenderer.invoke("sessions:get-diff-files", payload),
+  getFileDiff: payload => ipcRenderer.invoke("sessions:get-file-diff", payload),
   resolveClipboardFiles: files =>
     files
       .map(file => {
