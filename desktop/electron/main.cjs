@@ -238,9 +238,9 @@ async function getContainerGitBranch(containerName) {
     const { stdout } = await runCommand("docker", [
       "exec",
       containerName,
-      "git",
-      "branch",
-      "--show-current",
+      "bash",
+      "-c",
+      "cd /workspace/*/ 2>/dev/null && git branch --show-current",
     ]);
     return stdout.trim() || "";
   } catch {
