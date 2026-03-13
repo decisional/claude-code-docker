@@ -40,10 +40,24 @@ const COMMON_BIN_PATHS = [
   path.join(os.homedir(), ".docker", "bin"),
 ];
 
+function defaultRepoPath() {
+  // In packaged app, read the repo path that was embedded at build time.
+  // In dev, __dirname is desktop/electron, so ../../ is the repo root.
+  if (app.isPackaged) {
+    try {
+      const buildInfo = JSON.parse(require("fs").readFileSync(path.join(__dirname, "build-info.json"), "utf8"));
+      return buildInfo.repoPath || "";
+    } catch {
+      return "";
+    }
+  }
+  return path.resolve(__dirname, "..", "..");
+}
+
 function createDefaultState() {
   return {
     settings: {
-      repoPath: path.resolve(__dirname, "..", ".."),
+      repoPath: defaultRepoPath(),
       linearApiKey: "",
       linearProject: "",
     },
@@ -70,6 +84,13 @@ async function ensureStateLoaded() {
       },
       sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
     };
+
+    // Fix corrupted repoPath that points inside a .app bundle
+    const rp = appState.settings.repoPath;
+    if (rp && rp.includes(".app/")) {
+      appState.settings.repoPath = defaultRepoPath();
+      await persistState();
+    }
   } catch {
     appState = createDefaultState();
     await persistState();
@@ -86,7 +107,7 @@ async function persistState() {
 }
 
 function currentRepoPath() {
-  return appState.settings.repoPath || path.resolve(__dirname, "..", "..");
+  return appState.settings.repoPath || defaultRepoPath();
 }
 
 function buildSessionId(runtime, name) {

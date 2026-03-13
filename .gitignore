@@ -16,6 +16,7 @@ project.env
 .build-temp/
 desktop/node_modules/
 desktop/dist/
+desktop/electron/build-info.json
 desktop/.vite/
 desktop/release/
 desktop/out/

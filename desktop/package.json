@@ -10,7 +10,7 @@
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
     "dev:electron": "wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
-    "build": "vite build",
+    "build": "node -e \"require('fs').writeFileSync('electron/build-info.json', JSON.stringify({repoPath: require('path').resolve(__dirname, '..')}))\" && vite build",
     "start": "electron .",
     "rebuild": "electron-rebuild -f -w node-pty",
     "pack": "npm run build && electron-builder --dir",
