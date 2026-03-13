@@ -190,9 +190,14 @@ function SessionTerminal({ sessionId, active }) {
     fitRef.current = fit;
     terminalRegistry.set(sessionId, terminal);
 
+    // Strip mouse-mode enable sequences so xterm.js never captures mouse
+    // events from the app (Claude Code / Codex TUI). This keeps text
+    // selection and copy working at all times.
+    const MOUSE_MODE_RE = /\x1b\[\?(?:9|1000|1002|1003|1004|1005|1006|1015|1016)h/g;
+
     const onData = window.desktopApi.onTerminalData(({ sessionId: targetSessionId, data }) => {
       if (targetSessionId === sessionId) {
-        terminal.write(data);
+        terminal.write(typeof data === "string" ? data.replace(MOUSE_MODE_RE, "") : data);
       }
     });
 
