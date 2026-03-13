@@ -342,6 +342,8 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
 set -g status off
 set -g mouse on
 set -g default-terminal "xterm-256color"
+set -g extended-keys on
+set -as terminal-features ',xterm-256color:extkeys'
 TMUXCONF
 
     # On reset (RESET_TO_MAIN=true), kill the old tmux session so we get a fresh CLI.
