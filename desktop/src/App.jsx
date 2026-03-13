@@ -634,7 +634,7 @@ export default function App() {
     };
   }, []);
 
-  const selectSession = sessionId => {
+  const selectSession = async sessionId => {
     setActiveSessionId(sessionId);
 
     const timer = sessionSignalTimersRef.current[sessionId];
@@ -652,6 +652,19 @@ export default function App() {
       delete next[sessionId];
       return next;
     });
+
+    // Auto-attach if the session is not already attached
+    const session = sessions.find(s => s.id === sessionId);
+    if (session && session.status !== "attached") {
+      try {
+        setBusy(true);
+        await window.desktopApi.attachSession({ sessionId });
+      } catch {
+        // Ignore — session may already be starting or container not ready.
+      } finally {
+        setBusy(false);
+      }
+    }
   };
 
   const handleCreate = async payload => {
@@ -850,14 +863,6 @@ export default function App() {
                 <div className="action-row">
                   <button className="secondary" type="button" onClick={chooseRepo} disabled={busy}>
                     Repo
-                  </button>
-                  <button
-                    className="secondary"
-                    type="button"
-                    onClick={() => perform(window.desktopApi.attachSession, { sessionId: activeSession.id }, () => selectSession(activeSession.id))}
-                    disabled={busy}
-                  >
-                    Open
                   </button>
                   <button
                     className="secondary"
