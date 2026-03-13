@@ -216,6 +216,14 @@ function SessionTerminal({ sessionId, active }) {
           return false; // Prevent sending Ctrl+C to the terminal
         }
       }
+
+      // Shift+Enter sends CSI u escape sequence so apps like Claude Code
+      // can distinguish it from plain Enter and insert a newline.
+      if (event.shiftKey && event.key === "Enter" && event.type === "keydown") {
+        window.desktopApi.sendInput({ sessionId, data: "\x1b[13;2u" });
+        return false;
+      }
+
       return true;
     });
 
