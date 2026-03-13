@@ -860,6 +860,121 @@ input:focus {
   white-space: nowrap;
 }
 
+/* ── Terminal Tab Bar ── */
+
+.terminal-tab-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 4px 8px;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(26, 29, 26, 0.95);
+  backdrop-filter: blur(12px);
+  overflow-x: auto;
+}
+
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+  user-select: none;
+}
+
+.terminal-tab:hover {
+  background: var(--hover);
+  color: var(--text-dim);
+}
+
+.terminal-tab.active {
+  background: var(--sidebar-active);
+  color: var(--text);
+}
+
+.terminal-tab-label {
+  pointer-events: none;
+}
+
+.terminal-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
+}
+
+.terminal-tab:hover .terminal-tab-close {
+  opacity: 1;
+}
+
+.terminal-tab-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+}
+
+.terminal-tab-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+
+.terminal-tab-new:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Compact header for terminal sessions */
+
+.main-header-compact {
+  padding: 8px 16px;
+  min-height: auto;
+}
+
+.main-header-compact .main-heading-top h2 {
+  font-size: 14px;
+  margin: 0;
+}
+
+/* Runtime color for terminal */
+
+.session-avatar.runtime-terminal {
+  background: rgba(94, 234, 212, 0.12);
+  color: #5eead4;
+}
+
+.session-runtime.runtime-terminal {
+  color: #5eead4;
+}
+
 .terminal-host {
   position: absolute;
   inset: 40px 0 0;

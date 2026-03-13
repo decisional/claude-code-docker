@@ -11,6 +11,7 @@ const liveSessions = new Map();
 const notificationCooldowns = new Map();
 // Cache PR lookups per session: sessionId -> { branch, prNumber, prUrl }
 const prCache = new Map();
+let terminalTabCounter = 0;
 let mainWindow = null;
 let storePath = "";
 let appState = {
@@ -472,6 +473,7 @@ async function refreshSessionsFromDocker() {
   // Remove sessions whose Docker containers no longer exist (unless still starting)
   const dockerContainerNames = new Set(dockerSessions.map(c => c.name));
   const alive = enriched.filter(session => {
+    if (session.runtime === "terminal") return true;
     if (session.status === "starting") return true;
     if (liveSessions.has(session.id)) return true;
     if (session.containerName && dockerContainerNames.has(session.containerName)) return true;
@@ -613,6 +615,56 @@ async function startInteractiveSession(session, mode = "start", size) {
   });
 
   return getSessionById(session.id);
+}
+
+function nextTerminalTabId() {
+  terminalTabCounter += 1;
+  return `tab-${terminalTabCounter}`;
+}
+
+function startTerminalTab(sessionId, tabId, size) {
+  const termSize = { cols: (size && size.cols) || 120, rows: (size && size.rows) || 32 };
+  const liveKey = `${sessionId}:${tabId}`;
+
+  if (liveSessions.has(liveKey)) {
+    return;
+  }
+
+  const userShell = process.env.SHELL || "/bin/zsh";
+  const term = pty.spawn(userShell, ["--login"], {
+    cwd: os.homedir(),
+    env: buildRuntimeEnv(),
+    cols: termSize.cols,
+    rows: termSize.rows,
+    name: "xterm-256color",
+  });
+
+  liveSessions.set(liveKey, { term });
+
+  term.onData(data => {
+    emit("terminal:data", { sessionId: liveKey, data });
+  });
+
+  term.onExit(async () => {
+    liveSessions.delete(liveKey);
+
+    const session = getSessionById(sessionId);
+    if (session && session.tabs) {
+      session.tabs = session.tabs.filter(t => t !== tabId);
+      if (session.tabs.length === 0) {
+        removeSessionById(sessionId);
+      } else {
+        if (session.activeTabId === tabId) {
+          session.activeTabId = session.tabs[session.tabs.length - 1];
+        }
+        upsertSession(session);
+      }
+      await persistState();
+      emit("sessions:changed", appState.sessions);
+    }
+
+    emit("terminal:exit", { sessionId: liveKey, exitCode: 0 });
+  });
 }
 
 async function runDetachedScript(runtime, action, name) {
@@ -951,12 +1003,32 @@ ipcMain.handle("sessions:list", async () => {
 ipcMain.handle("sessions:create", async (_event, payload) => {
   await ensureStateLoaded();
   const name = String(payload.name || "").trim();
-  const runtime = payload.runtime === "codex" ? "codex" : "claude";
+  const runtime = payload.runtime === "terminal" ? "terminal" : payload.runtime === "codex" ? "codex" : "claude";
   const branch = String(payload.branch || "").trim();
   const port = String(payload.port || "").trim();
 
   if (!name) {
     throw new Error("Session name is required.");
+  }
+
+  if (runtime === "terminal") {
+    const tabId = nextTerminalTabId();
+    const session = {
+      id: buildSessionId("terminal", name),
+      name,
+      runtime: "terminal",
+      status: "attached",
+      tabs: [tabId],
+      activeTabId: tabId,
+      createdAt: new Date().toISOString(),
+      lastOpenedAt: new Date().toISOString(),
+    };
+
+    upsertSession(session);
+    await persistState();
+    startTerminalTab(session.id, tabId, payload.size);
+    emit("sessions:changed", appState.sessions);
+    return getSessionById(session.id);
   }
 
   const session = {
@@ -983,6 +1055,9 @@ ipcMain.handle("sessions:attach", async (_event, payload) => {
   const session = getSessionById(payload.sessionId);
   if (!session) {
     throw new Error("Session not found.");
+  }
+  if (session.runtime === "terminal") {
+    return getSessionById(session.id);
   }
   await startInteractiveSession(session, "start", payload.size || undefined);
   await refreshSessionsFromDocker();
@@ -1207,6 +1282,21 @@ ipcMain.handle("sessions:stop", async (_event, payload) => {
     throw new Error("Session not found.");
   }
 
+  if (session.runtime === "terminal") {
+    for (const tabId of (session.tabs || [])) {
+      const liveKey = `${session.id}:${tabId}`;
+      const live = liveSessions.get(liveKey);
+      if (live) {
+        try { live.term.kill(); } catch {}
+        liveSessions.delete(liveKey);
+      }
+    }
+    removeSessionById(session.id);
+    await persistState();
+    emit("sessions:changed", appState.sessions);
+    return true;
+  }
+
   const live = liveSessions.get(session.id);
   if (live) {
     try {
@@ -1228,6 +1318,21 @@ ipcMain.handle("sessions:remove", async (_event, payload) => {
     throw new Error("Session not found.");
   }
 
+  if (session.runtime === "terminal") {
+    for (const tabId of (session.tabs || [])) {
+      const liveKey = `${session.id}:${tabId}`;
+      const live = liveSessions.get(liveKey);
+      if (live) {
+        try { live.term.kill(); } catch {}
+        liveSessions.delete(liveKey);
+      }
+    }
+    removeSessionById(session.id);
+    await persistState();
+    emit("sessions:changed", appState.sessions);
+    return true;
+  }
+
   const live = liveSessions.get(session.id);
   if (live) {
     try {
@@ -1243,4 +1348,52 @@ ipcMain.handle("sessions:remove", async (_event, payload) => {
   await persistState();
   await refreshSessionsFromDocker();
   return true;
+});
+
+ipcMain.handle("sessions:create-tab", async (_event, payload) => {
+  const session = getSessionById(payload.sessionId);
+  if (!session || session.runtime !== "terminal") {
+    throw new Error("Not a terminal session.");
+  }
+
+  const tabId = nextTerminalTabId();
+  session.tabs = [...(session.tabs || []), tabId];
+  session.activeTabId = tabId;
+  upsertSession(session);
+  await persistState();
+  startTerminalTab(session.id, tabId, payload.size);
+  emit("sessions:changed", appState.sessions);
+  return { tabId, session: getSessionById(session.id) };
+});
+
+ipcMain.handle("sessions:close-tab", async (_event, payload) => {
+  const session = getSessionById(payload.sessionId);
+  if (!session || session.runtime !== "terminal") {
+    throw new Error("Not a terminal session.");
+  }
+
+  const liveKey = `${session.id}:${payload.tabId}`;
+  const live = liveSessions.get(liveKey);
+  if (live) {
+    try { live.term.kill(); } catch {}
+    liveSessions.delete(liveKey);
+  }
+
+  session.tabs = (session.tabs || []).filter(t => t !== payload.tabId);
+
+  if (session.tabs.length === 0) {
+    removeSessionById(session.id);
+    await persistState();
+    emit("sessions:changed", appState.sessions);
+    return { removed: true };
+  }
+
+  if (session.activeTabId === payload.tabId) {
+    session.activeTabId = session.tabs[session.tabs.length - 1];
+  }
+
+  upsertSession(session);
+  await persistState();
+  emit("sessions:changed", appState.sessions);
+  return { removed: false, session: getSessionById(session.id) };
 });

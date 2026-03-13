@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
   resetSession: payload => ipcRenderer.invoke("sessions:reset", payload),
   stopSession: payload => ipcRenderer.invoke("sessions:stop", payload),
   removeSession: payload => ipcRenderer.invoke("sessions:remove", payload),
+  createTab: payload => ipcRenderer.invoke("sessions:create-tab", payload),
+  closeTab: payload => ipcRenderer.invoke("sessions:close-tab", payload),
   sendInput: payload => ipcRenderer.invoke("sessions:input", payload),
   resizeSession: payload => ipcRenderer.invoke("sessions:resize", payload),
   readClipboardText: () => ipcRenderer.invoke("clipboard:read-text"),

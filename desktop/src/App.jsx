@@ -24,6 +24,7 @@ const STATUS_LABELS = {
 const SHELL_SAFE_PATH_RE = /^[A-Za-z0-9_./:@%+=,-]+$/;
 
 function runtimeLabel(runtime) {
+  if (runtime === "terminal") return "Terminal";
   return runtime === "codex" ? "Codex" : "Claude";
 }
 
@@ -721,10 +722,52 @@ function SessionSignal({ state }) {
   return null;
 }
 
+function TerminalTabBar({ session, activeTabId, onSelectTab, onNewTab, onCloseTab }) {
+  const tabs = session.tabs || [];
+  return (
+    <div className="terminal-tab-bar">
+      {tabs.map((tabId, index) => (
+        <div
+          className={`terminal-tab ${tabId === activeTabId ? "active" : ""}`}
+          key={tabId}
+          onClick={() => onSelectTab(tabId)}
+        >
+          <span className="terminal-tab-label">Shell {index + 1}</span>
+          {tabs.length > 1 ? (
+            <button
+              className="terminal-tab-close"
+              type="button"
+              onClick={e => {
+                e.stopPropagation();
+                onCloseTab(tabId);
+              }}
+              title="Close tab"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+              </svg>
+            </button>
+          ) : null}
+        </div>
+      ))}
+      <button className="terminal-tab-new" type="button" onClick={onNewTab} title="New tab (Cmd+T)">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 function SessionAvatar({ session }) {
   return (
     <span className={`session-avatar runtime-${session.runtime}`}>
-      {session.runtime === "codex" ? (
+      {session.runtime === "terminal" ? (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M4 5l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M9 11h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      ) : session.runtime === "codex" ? (
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
           <path d="M5 4l-3 4 3 4M11 4l3 4-3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -775,10 +818,14 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
         return;
       }
 
-      // Tab toggles between Claude and Codex (unless in an input field)
+      // Tab cycles through runtimes (unless in an input field)
       if (event.key === "Tab" && event.target.tagName !== "INPUT") {
         event.preventDefault();
-        setRuntime(current => (current === "claude" ? "codex" : "claude"));
+        setRuntime(current => {
+          if (current === "claude") return "codex";
+          if (current === "codex") return "terminal";
+          return "claude";
+        });
       }
     };
 
@@ -796,7 +843,7 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
     await onCreate({
       runtime,
       name: resolvedName,
-      branch: branch.trim(),
+      branch: runtime === "terminal" ? "" : branch.trim(),
       port: runtime === "claude" ? port.trim() : "",
     });
   };
@@ -840,15 +887,27 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
               <span className="runtime-button-label">Codex</span>
               <span className="runtime-button-copy">Clean container, branch optional</span>
             </button>
+            <button
+              aria-selected={runtime === "terminal"}
+              className={runtime === "terminal" ? "runtime-button active" : "runtime-button"}
+              type="button"
+              onClick={() => setRuntime("terminal")}
+            >
+              <span className="runtime-button-label">Terminal</span>
+              <span className="runtime-button-copy">Local shell with your zshrc</span>
+            </button>
           </div>
 
           <div className="overlay-preview">
             <div className="overlay-preview-row">
-              <span className={`session-avatar runtime-${runtime}`}>{runtime === "claude" ? "CL" : "CX"}</span>
+              <span className={`session-avatar runtime-${runtime}`}>{runtime === "claude" ? "CL" : runtime === "codex" ? "CX" : "T"}</span>
               <div className="overlay-preview-copy">
                 <span className="overlay-preview-title">{resolvedName}</span>
                 <span className="overlay-preview-text">
-                  Starts as {runtimeLabel(runtime)} with project <strong>{`${runtime}-${resolvedName}`}</strong>
+                  {runtime === "terminal"
+                    ? <>Opens a local shell session with multi-tab support</>
+                    : <>Starts as {runtimeLabel(runtime)} with project <strong>{`${runtime}-${resolvedName}`}</strong></>
+                  }
                 </span>
               </div>
             </div>
@@ -871,11 +930,13 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
                 <small>{name.trim() ? `Saved as ${resolvedName}` : `Defaults to ${suggestedName}`}</small>
               </label>
 
-              <label className="overlay-field">
-                <span>Branch</span>
-                <input value={branch} onChange={event => setBranch(event.target.value)} placeholder="optional branch" />
-                <small>Leave blank to use the default branch for the runtime script.</small>
-              </label>
+              {runtime !== "terminal" ? (
+                <label className="overlay-field">
+                  <span>Branch</span>
+                  <input value={branch} onChange={event => setBranch(event.target.value)} placeholder="optional branch" />
+                  <small>Leave blank to use the default branch for the runtime script.</small>
+                </label>
+              ) : null}
 
               {runtime === "claude" ? (
                 <label className="overlay-field">
@@ -1260,6 +1321,7 @@ export default function App() {
   });
   const [showLinearSettings, setShowLinearSettings] = useState(false);
   const [showLinearBrowser, setShowLinearBrowser] = useState(false);
+  const [activeTerminalTabId, setActiveTerminalTabId] = useState("");
   const activeSessionIdRef = useRef("");
   const sessionSignalTimersRef = useRef({});
 
@@ -1311,6 +1373,36 @@ export default function App() {
           port: "",
         });
         return;
+      }
+
+      // Cmd+Shift+T — quick-create Terminal session (skip form)
+      if (key === "t" && mod && event.shiftKey) {
+        event.preventDefault();
+        handleCreate({
+          runtime: "terminal",
+          name: buildSuggestedSessionName("terminal", sessions),
+        });
+        return;
+      }
+
+      // Cmd+T — new tab in active terminal session
+      if (key === "t" && mod && !event.shiftKey) {
+        const activeSession = sessions.find(s => s.id === activeSessionIdRef.current);
+        if (activeSession && activeSession.runtime === "terminal") {
+          event.preventDefault();
+          handleNewTab(activeSession.id);
+          return;
+        }
+      }
+
+      // Cmd+W — close active tab in terminal session
+      if (key === "w" && mod && !event.shiftKey) {
+        const activeSession = sessions.find(s => s.id === activeSessionIdRef.current);
+        if (activeSession && activeSession.runtime === "terminal" && activeSession.activeTabId) {
+          event.preventDefault();
+          handleCloseTab(activeSession.id, activeSession.activeTabId);
+          return;
+        }
       }
 
       // Cmd+N — new session (default)
@@ -1405,20 +1497,27 @@ export default function App() {
     });
 
     const offTerminal = window.desktopApi.onTerminalData(({ sessionId }) => {
-      if (sessionId !== activeSessionIdRef.current) {
-        clearSignalTimer(sessionId);
-        setSessionSignals(current => ({ ...current, [sessionId]: "running" }));
-        sessionSignalTimersRef.current[sessionId] = setTimeout(() => {
-          setSessionSignals(current => ({ ...current, [sessionId]: "attention" }));
-          delete sessionSignalTimersRef.current[sessionId];
+      // For terminal tabs, sessionId is "terminal:name:tab-X" — extract base session ID
+      const baseId = sessionId.startsWith("terminal:") && sessionId.split(":").length > 2
+        ? sessionId.split(":").slice(0, 2).join(":")
+        : sessionId;
+      if (baseId !== activeSessionIdRef.current) {
+        clearSignalTimer(baseId);
+        setSessionSignals(current => ({ ...current, [baseId]: "running" }));
+        sessionSignalTimersRef.current[baseId] = setTimeout(() => {
+          setSessionSignals(current => ({ ...current, [baseId]: "attention" }));
+          delete sessionSignalTimersRef.current[baseId];
         }, 1800);
       }
     });
 
     const offExit = window.desktopApi.onTerminalExit(({ sessionId }) => {
-      if (sessionId !== activeSessionIdRef.current) {
-        clearSignalTimer(sessionId);
-        setSessionSignals(current => ({ ...current, [sessionId]: "attention" }));
+      const baseId = sessionId.startsWith("terminal:") && sessionId.split(":").length > 2
+        ? sessionId.split(":").slice(0, 2).join(":")
+        : sessionId;
+      if (baseId !== activeSessionIdRef.current) {
+        clearSignalTimer(baseId);
+        setSessionSignals(current => ({ ...current, [baseId]: "attention" }));
       }
     });
 
@@ -1460,8 +1559,15 @@ export default function App() {
       return next;
     });
 
-    // Auto-attach if the session is not already attached
+    // For terminal sessions, sync the active tab
     const session = sessions.find(s => s.id === sessionId);
+    if (session && session.runtime === "terminal" && session.activeTabId) {
+      setActiveTerminalTabId(session.activeTabId);
+      focusTerminal(`${sessionId}:${session.activeTabId}`);
+      return;
+    }
+
+    // Auto-attach if the session is not already attached
     if (session && session.status !== "attached") {
       try {
         setBusy(true);
@@ -1482,12 +1588,45 @@ export default function App() {
       setError("");
       const session = await window.desktopApi.createSession(payload);
       setShowComposer(false);
+      if (session.runtime === "terminal" && session.activeTabId) {
+        setActiveTerminalTabId(session.activeTabId);
+      }
       selectSession(session.id);
     } catch (createError) {
       setError(createError.message || "Failed to create session.");
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleNewTab = async sessionId => {
+    try {
+      const result = await window.desktopApi.createTab({ sessionId });
+      setActiveTerminalTabId(result.tabId);
+      focusTerminal(`${sessionId}:${result.tabId}`);
+    } catch (tabError) {
+      setError(tabError.message || "Failed to create tab.");
+    }
+  };
+
+  const handleCloseTab = async (sessionId, tabId) => {
+    try {
+      const result = await window.desktopApi.closeTab({ sessionId, tabId });
+      if (result.removed) {
+        setActiveSessionId("");
+        setActiveTerminalTabId("");
+      } else if (result.session) {
+        setActiveTerminalTabId(result.session.activeTabId || "");
+        focusTerminal(`${sessionId}:${result.session.activeTabId}`);
+      }
+    } catch (tabError) {
+      setError(tabError.message || "Failed to close tab.");
+    }
+  };
+
+  const handleSelectTab = (sessionId, tabId) => {
+    setActiveTerminalTabId(tabId);
+    focusTerminal(`${sessionId}:${tabId}`);
   };
 
   const handleCreateWithTicket = async payload => {
@@ -1623,7 +1762,10 @@ export default function App() {
                             </div>
                             <div className="session-meta-text">
                               <span className={`session-runtime runtime-${session.runtime}`}>{runtimeLabel(session.runtime)}</span>
-                              {(session.currentBranch || session.branch) ? (
+                              {session.runtime === "terminal" && session.tabs ? (
+                                <span>{session.tabs.length} {session.tabs.length === 1 ? "tab" : "tabs"}</span>
+                              ) : null}
+                              {session.runtime !== "terminal" && (session.currentBranch || session.branch) ? (
                                 <span title="Current git branch">{session.currentBranch || session.branch}</span>
                               ) : null}
                               {session.prNumber ? (
@@ -1675,7 +1817,7 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="session-subtle">{session.dockerStatus || "Waiting for container state"}</div>
+                        <div className="session-subtle">{session.runtime === "terminal" ? "Local shell" : (session.dockerStatus || "Waiting for container state")}</div>
                       </div>
                     ) : null}
                   </div>
@@ -1750,122 +1892,170 @@ export default function App() {
           {error ? <div className="error-banner">{error}</div> : null}
           {activeSession ? (
             <>
-              <header className="main-header">
-                <div className="main-heading">
-                  <div className="main-heading-top">
-                    <SessionAvatar session={activeSession} />
-                    <div className="main-heading-copy">
-                      <div className="eyebrow">{activeSession.name}</div>
-                      <h2>{activeSession.threadTitle || activeSession.name}</h2>
+              {activeSession.runtime === "terminal" ? (
+                <header className="main-header main-header-compact">
+                  <div className="main-heading">
+                    <div className="main-heading-top">
+                      <SessionAvatar session={activeSession} />
+                      <div className="main-heading-copy">
+                        <h2>{activeSession.name}</h2>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="header-status-row">
-                    <span className={`session-runtime runtime-${activeSession.runtime}`}>{runtimeLabel(activeSession.runtime)}</span>
-                    <span className="header-divider" />
-                    <StatusBadge session={activeSession} />
-                    <span className="header-divider" />
-                    <span>{activeSession.dockerStatus || "Ready"}</span>
-                  </div>
-
-                  <SessionFacts session={activeSession} className="session-facts detail-facts" />
-                </div>
-
-                <div className="action-row">
-                  <button
-                    className="secondary"
-                    type="button"
-                    onClick={() => perform(window.desktopApi.resetSession, { sessionId: activeSession.id }, () => focusTerminal(activeSession.id))}
-                    disabled={busy}
-                  >
-                    Reset
-                  </button>
-                  <button
-                    className="secondary"
-                    type="button"
-                    onClick={() => perform(window.desktopApi.stopSession, { sessionId: activeSession.id })}
-                    disabled={busy}
-                  >
-                    Stop
-                  </button>
-                  <button
-                    className="danger"
-                    type="button"
-                    onClick={() =>
-                      perform(window.desktopApi.removeSession, { sessionId: activeSession.id }, () => {
-                        setActiveSessionId("");
-                      })
-                    }
-                    disabled={busy}
-                  >
-                    Remove
-                  </button>
-                </div>
-              </header>
-
-              <section className="terminal-stage">
-                <div className="terminal-toolbar">
-                  <div className="terminal-toolbar-main">
-                    <span className="terminal-shell-dot" />
-                    <span className="terminal-shell-dot" />
-                    <span className="terminal-shell-dot" />
-                    <div className="terminal-label-group">
-                      <span className="terminal-shell-label">{runtimeLabel(activeSession.runtime)} session</span>
-                      <span className="terminal-shell-meta">{activeSession.containerName}</span>
-                    </div>
-                  </div>
-
-                  <div className="terminal-toolbar-aside">
-                    {(activeSession.currentBranch || activeSession.branch) ? <span className="terminal-chip">branch {activeSession.currentBranch || activeSession.branch}</span> : null}
-                    {activeSession.prNumber ? (
-                      <>
-                        <span
-                          className="terminal-chip session-pr-link"
-                          onClick={() => window.desktopApi.openExternal(activeSession.prUrl)}
-                        >
-                          PR #{activeSession.prNumber}
-                        </span>
-                        {activeSession.repoSlug ? (
-                          <span
-                            className="terminal-chip session-pr-link devin-link"
-                            onClick={() => window.desktopApi.openExternal(`https://app.devin.ai/review/${activeSession.repoSlug}/pull/${activeSession.prNumber}`)}
-                          >
-                            Devin
-                          </span>
-                        ) : null}
-                      </>
-                    ) : null}
-                    {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
-                    {activeSession.linearTicketId ? (
-                      <>
-                        <span
-                          className="terminal-chip session-linear-link"
-                          onClick={() => activeSession.linearTicketUrl && window.desktopApi.openExternal(activeSession.linearTicketUrl)}
-                        >
-                          {activeSession.linearTicketId}
-                        </span>
-                        {activeSession.linearTicketPrompt ? (
-                          <CopyPromptButton prompt={activeSession.linearTicketPrompt} />
-                        ) : null}
-                      </>
-                    ) : null}
+                  <div className="action-row">
                     <button
-                      className={`terminal-chip review-toggle ${reviewPanelOpen ? "active" : ""}`}
+                      className="danger"
                       type="button"
-                      onClick={() => setReviewPanelOpen(current => !current)}
-                      title="Toggle review panel"
+                      onClick={() =>
+                        perform(window.desktopApi.removeSession, { sessionId: activeSession.id }, () => {
+                          setActiveSessionId("");
+                          setActiveTerminalTabId("");
+                        })
+                      }
+                      disabled={busy}
                     >
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                        <path d="M5.5 3.5L2 7l3.5 3.5M10.5 3.5L14 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                      Changes
+                      Close
                     </button>
                   </div>
-                </div>
+                </header>
+              ) : (
+                <header className="main-header">
+                  <div className="main-heading">
+                    <div className="main-heading-top">
+                      <SessionAvatar session={activeSession} />
+                      <div className="main-heading-copy">
+                        <div className="eyebrow">{activeSession.name}</div>
+                        <h2>{activeSession.threadTitle || activeSession.name}</h2>
+                      </div>
+                    </div>
 
-                {sessions.map(session => (
-                  <SessionTerminal key={session.id} sessionId={session.id} active={session.id === activeSessionId} />
-                ))}
+                    <div className="header-status-row">
+                      <span className={`session-runtime runtime-${activeSession.runtime}`}>{runtimeLabel(activeSession.runtime)}</span>
+                      <span className="header-divider" />
+                      <StatusBadge session={activeSession} />
+                      <span className="header-divider" />
+                      <span>{activeSession.dockerStatus || "Ready"}</span>
+                    </div>
+
+                    <SessionFacts session={activeSession} className="session-facts detail-facts" />
+                  </div>
+
+                  <div className="action-row">
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() => perform(window.desktopApi.resetSession, { sessionId: activeSession.id }, () => focusTerminal(activeSession.id))}
+                      disabled={busy}
+                    >
+                      Reset
+                    </button>
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() => perform(window.desktopApi.stopSession, { sessionId: activeSession.id })}
+                      disabled={busy}
+                    >
+                      Stop
+                    </button>
+                    <button
+                      className="danger"
+                      type="button"
+                      onClick={() =>
+                        perform(window.desktopApi.removeSession, { sessionId: activeSession.id }, () => {
+                          setActiveSessionId("");
+                        })
+                      }
+                      disabled={busy}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </header>
+              )}
+
+              <section className="terminal-stage">
+                {activeSession.runtime === "terminal" ? (
+                  <TerminalTabBar
+                    session={activeSession}
+                    activeTabId={activeTerminalTabId}
+                    onSelectTab={tabId => handleSelectTab(activeSession.id, tabId)}
+                    onNewTab={() => handleNewTab(activeSession.id)}
+                    onCloseTab={tabId => handleCloseTab(activeSession.id, tabId)}
+                  />
+                ) : (
+                  <div className="terminal-toolbar">
+                    <div className="terminal-toolbar-main">
+                      <span className="terminal-shell-dot" />
+                      <span className="terminal-shell-dot" />
+                      <span className="terminal-shell-dot" />
+                      <div className="terminal-label-group">
+                        <span className="terminal-shell-label">{runtimeLabel(activeSession.runtime)} session</span>
+                        <span className="terminal-shell-meta">{activeSession.containerName}</span>
+                      </div>
+                    </div>
+
+                    <div className="terminal-toolbar-aside">
+                      {(activeSession.currentBranch || activeSession.branch) ? <span className="terminal-chip">branch {activeSession.currentBranch || activeSession.branch}</span> : null}
+                      {activeSession.prNumber ? (
+                        <>
+                          <span
+                            className="terminal-chip session-pr-link"
+                            onClick={() => window.desktopApi.openExternal(activeSession.prUrl)}
+                          >
+                            PR #{activeSession.prNumber}
+                          </span>
+                          {activeSession.repoSlug ? (
+                            <span
+                              className="terminal-chip session-pr-link devin-link"
+                              onClick={() => window.desktopApi.openExternal(`https://app.devin.ai/review/${activeSession.repoSlug}/pull/${activeSession.prNumber}`)}
+                            >
+                              Devin
+                            </span>
+                          ) : null}
+                        </>
+                      ) : null}
+                      {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
+                      {activeSession.linearTicketId ? (
+                        <>
+                          <span
+                            className="terminal-chip session-linear-link"
+                            onClick={() => activeSession.linearTicketUrl && window.desktopApi.openExternal(activeSession.linearTicketUrl)}
+                          >
+                            {activeSession.linearTicketId}
+                          </span>
+                          {activeSession.linearTicketPrompt ? (
+                            <CopyPromptButton prompt={activeSession.linearTicketPrompt} />
+                          ) : null}
+                        </>
+                      ) : null}
+                      <button
+                        className={`terminal-chip review-toggle ${reviewPanelOpen ? "active" : ""}`}
+                        type="button"
+                        onClick={() => setReviewPanelOpen(current => !current)}
+                        title="Toggle review panel"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                          <path d="M5.5 3.5L2 7l3.5 3.5M10.5 3.5L14 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        Changes
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {sessions.map(session => {
+                  if (session.runtime === "terminal" && session.tabs) {
+                    return session.tabs.map(tabId => (
+                      <SessionTerminal
+                        key={`${session.id}:${tabId}`}
+                        sessionId={`${session.id}:${tabId}`}
+                        active={session.id === activeSessionId && tabId === activeTerminalTabId}
+                      />
+                    ));
+                  }
+                  return <SessionTerminal key={session.id} sessionId={session.id} active={session.id === activeSessionId} />;
+                })}
               </section>
             </>
           ) : (
@@ -1874,7 +2064,7 @@ export default function App() {
                 <div className="empty-mark" />
                 <div className="eyebrow">Autodex desktop</div>
                 <h2>Let&apos;s build.</h2>
-                <p>Keep the terminal front and center. Spin up a fresh Claude or Codex session when you need it.</p>
+                <p>Keep the terminal front and center. Spin up a fresh Claude or Codex session, or open a regular terminal.</p>
                 <div className="empty-actions">
                   <button className="primary" type="button" onClick={() => setShowComposer(true)}>
                     Start session
