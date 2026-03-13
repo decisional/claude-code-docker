@@ -575,9 +575,6 @@ export default function App() {
 
         setSettings(nextSettings);
         setSessions(nextSessions);
-        if (!activeSessionId && nextSessions[0]) {
-          setActiveSessionId(nextSessions[0].id);
-        }
       } catch (bootstrapError) {
         if (!ignore) {
           setError(bootstrapError.message || "Failed to load sessions.");
@@ -608,9 +605,7 @@ export default function App() {
       const currentActive = activeSessionIdRef.current;
       const stillExists = nextSessions.some(session => session.id === currentActive);
       if (!stillExists) {
-        setActiveSessionId(nextSessions[0]?.id || "");
-      } else if (!currentActive && nextSessions[0]) {
-        setActiveSessionId(nextSessions[0].id);
+        setActiveSessionId("");
       }
     });
 
