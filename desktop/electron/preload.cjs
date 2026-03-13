@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   sendInput: payload => ipcRenderer.invoke("sessions:input", payload),
   resizeSession: payload => ipcRenderer.invoke("sessions:resize", payload),
   readClipboardText: () => ipcRenderer.invoke("clipboard:read-text"),
+  writeClipboardText: text => ipcRenderer.invoke("clipboard:write-text", text),
   readClipboardFilePaths: () => ipcRenderer.invoke("clipboard:read-file-paths"),
   openExternal: url => ipcRenderer.invoke("shell:open-external", url),
   confirmDialog: options => ipcRenderer.invoke("dialog:confirm", options),

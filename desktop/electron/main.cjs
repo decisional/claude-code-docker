@@ -11,9 +11,6 @@ const liveSessions = new Map();
 const notificationCooldowns = new Map();
 // Cache PR lookups per session: sessionId -> { branch, prNumber, prUrl }
 const prCache = new Map();
-// Queue initial messages to send once a session's prompt is detected
-// sessionId -> { message, promptDetected, buffer }
-const initialMessageQueue = new Map();
 let mainWindow = null;
 let storePath = "";
 let appState = {
@@ -558,22 +555,6 @@ async function startInteractiveSession(session, mode = "start", size) {
   term.onData(data => {
     emit("terminal:data", { sessionId: session.id, data });
 
-    // Detect prompt readiness and send queued initial message
-    const queued = initialMessageQueue.get(session.id);
-    if (queued && !queued.promptDetected) {
-      queued.buffer += data;
-      // Claude Code prompt: ❯  |  Codex prompt: ›
-      // Also detect ">" as fallback for plain prompts
-      if (/[❯›]\s*$/.test(queued.buffer) || /\n>\s*$/.test(queued.buffer)) {
-        queued.promptDetected = true;
-        // Small delay to ensure the prompt is fully rendered
-        setTimeout(() => {
-          term.write(queued.message + "\r");
-          initialMessageQueue.delete(session.id);
-        }, 500);
-      }
-    }
-
     if (!mainWindow?.isFocused()) {
       notifyIfHidden(session.name, "Session received output.", {
         cooldownKey: `session-output:${session.id}`,
@@ -1034,6 +1015,7 @@ ipcMain.handle("sessions:get-file-diff", async (_event, payload) => {
 });
 
 ipcMain.handle("clipboard:read-text", async () => clipboard.readText());
+ipcMain.handle("clipboard:write-text", async (_event, text) => clipboard.writeText(text));
 
 ipcMain.handle("clipboard:read-file-paths", async () => {
   const formats = clipboard.availableFormats();
@@ -1126,27 +1108,6 @@ ipcMain.handle("sessions:create-with-ticket", async (_event, payload) => {
 
   upsertSession(session);
   await persistState();
-
-  // Build the initial message to send to the LLM
-  if (ticket) {
-    let ticketMessage = `Pick up Linear ticket ${ticket.identifier}: ${ticket.title}\n\nURL: ${ticket.url}`;
-    if (ticket.description) {
-      ticketMessage += `\n\nDescription:\n${ticket.description}`;
-    }
-    if (ticket.comments && ticket.comments.length > 0) {
-      ticketMessage += "\n\nComments:";
-      for (const comment of ticket.comments) {
-        ticketMessage += `\n- ${comment.user}: ${comment.body}`;
-      }
-    }
-    ticketMessage += "\n\nPlease read the full ticket using the /linear skill if available, then start working on it.";
-
-    initialMessageQueue.set(session.id, {
-      message: ticketMessage,
-      promptDetected: false,
-      buffer: "",
-    });
-  }
 
   await startInteractiveSession(session, "start", payload.size || { cols: 120, rows: 32 });
 

@@ -155,11 +155,12 @@ function SessionTerminal({ sessionId, active }) {
       cursorBlink: true,
       fontSize: 13,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      allowProposedApi: true,
       theme: {
         background: "#1a1d1a",
         foreground: "#e8e8e6",
         cursor: "#8bc48b",
-        selectionBackground: "rgba(139, 196, 139, 0.15)",
+        selectionBackground: "rgba(139, 196, 139, 0.35)",
         black: "#1a1d1a",
         brightBlack: "#4a4a46",
         white: "#e8e8e6",
@@ -197,6 +198,19 @@ function SessionTerminal({ sessionId, active }) {
 
     terminal.onData(data => {
       window.desktopApi.sendInput({ sessionId, data });
+    });
+
+    // Cmd+C copies selection when text is selected, otherwise sends SIGINT
+    terminal.attachCustomKeyEventHandler(event => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "c" && event.type === "keydown") {
+        const selection = terminal.getSelection();
+        if (selection) {
+          window.desktopApi.writeClipboardText(selection);
+          terminal.clearSelection();
+          return false; // Prevent sending Ctrl+C to the terminal
+        }
+      }
+      return true;
     });
 
     const handlePaste = async event => {
@@ -998,6 +1012,32 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession })
     }
   };
 
+  const buildTicketPrompt = t => {
+    let prompt = `Pick up Linear ticket ${t.identifier}: ${t.title}\n\nURL: ${t.url}`;
+    if (t.description) {
+      prompt += `\n\nDescription:\n${t.description}`;
+    }
+    const comments = t.comments?.nodes || [];
+    if (comments.length > 0) {
+      prompt += "\n\nComments:";
+      for (const c of comments) {
+        prompt += `\n- ${c.user?.name || "Unknown"}: ${c.body}`;
+      }
+    }
+    prompt += "\n\nPlease read the full ticket using the /linear skill if available, then start working on it.";
+    return prompt;
+  };
+
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyPrompt = async () => {
+    if (!ticket) return;
+    const prompt = buildTicketPrompt(ticket);
+    await window.desktopApi.writeClipboardText(prompt);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const handleSubmit = async () => {
     if (!ticket) return;
     setSubmitting(true);
@@ -1014,6 +1054,11 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession })
           body: c.body,
         })),
       };
+
+      // Copy prompt to clipboard so user can paste it
+      const prompt = buildTicketPrompt(ticket);
+      await window.desktopApi.writeClipboardText(prompt);
+
       await onCreateSession({
         runtime: selectedRuntime,
         name: buildSuggestedSessionName(selectedRuntime, sessions, sessionName),
@@ -1117,6 +1162,9 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession })
               </button>
               <button className="secondary" type="button" onClick={handleSkip} disabled={currentIndex >= tickets.length - 1}>
                 Skip
+              </button>
+              <button className="secondary" type="button" onClick={handleCopyPrompt}>
+                {copied ? "Copied!" : "Copy Prompt"}
               </button>
               <button className="primary" type="button" onClick={handleSubmit} disabled={submitting || busy}>
                 {submitting ? "Starting..." : `Start ${runtimeLabel(selectedRuntime)}`}
