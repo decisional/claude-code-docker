@@ -287,7 +287,7 @@ async function getContainerThreadTitle(containerName) {
         }
       }
 
-      return text.slice(0, 120);
+      return text.slice(0, 60);
     }
 
     return "";

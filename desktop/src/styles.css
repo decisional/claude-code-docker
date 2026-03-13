@@ -547,6 +547,7 @@ input:focus {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
+  min-width: 0;
 }
 
 .session-diff-stats {
@@ -570,6 +571,10 @@ input:focus {
   font-weight: 500;
   letter-spacing: -0.01em;
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .session-meta-text {
