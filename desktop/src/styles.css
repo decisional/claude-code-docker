@@ -188,6 +188,8 @@ input:focus {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 .sidebar-chrome,
