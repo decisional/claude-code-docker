@@ -67,6 +67,8 @@ if [ ! -d "./shared" ]; then
     echo "✅ Created shared directory"
 fi
 
+./scripts/sync-shared-agents.sh
+
 if [ ! -d "./codex-data" ]; then
     mkdir -p ./codex-data
     echo "✅ Created codex-data directory"

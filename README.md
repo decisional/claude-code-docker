@@ -319,6 +319,8 @@ cp -r /path/to/dataset ./shared/mydata
 - Share models, prompts, or test data
 - Quick data staging without rebuilding containers
 
+If this repo has an `AGENTS.md`, the start/build scripts also sync it to `./shared/AGENTS.md`. When a container clones a repo that does not already have its own `AGENTS.md`, the scripts copy the shared file into the cloned workspace and add `AGENTS.md` to `.git/info/exclude` so it stays out of git status.
+
 **Note:** The shared directory is mounted read-only (`:ro`) inside containers for safety. Containers cannot modify files in `/shared`. To update shared data, modify files in `./shared` on your host machine.
 
 ## Advanced Usage
