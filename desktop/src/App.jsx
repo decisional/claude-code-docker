@@ -999,26 +999,19 @@ export default function App() {
     });
 
     const offTerminal = window.desktopApi.onTerminalData(({ sessionId }) => {
-      clearSignalTimer(sessionId);
-      setSessionSignals(current => ({ ...current, [sessionId]: "running" }));
-      sessionSignalTimersRef.current[sessionId] = setTimeout(() => {
-        // Only show attention dot for background sessions
-        if (sessionId !== activeSessionIdRef.current) {
+      if (sessionId !== activeSessionIdRef.current) {
+        clearSignalTimer(sessionId);
+        setSessionSignals(current => ({ ...current, [sessionId]: "running" }));
+        sessionSignalTimersRef.current[sessionId] = setTimeout(() => {
           setSessionSignals(current => ({ ...current, [sessionId]: "attention" }));
-        } else {
-          setSessionSignals(current => {
-            const next = { ...current };
-            delete next[sessionId];
-            return next;
-          });
-        }
-        delete sessionSignalTimersRef.current[sessionId];
-      }, 1800);
+          delete sessionSignalTimersRef.current[sessionId];
+        }, 1800);
+      }
     });
 
     const offExit = window.desktopApi.onTerminalExit(({ sessionId }) => {
-      clearSignalTimer(sessionId);
       if (sessionId !== activeSessionIdRef.current) {
+        clearSignalTimer(sessionId);
         setSessionSignals(current => ({ ...current, [sessionId]: "attention" }));
       }
     });
