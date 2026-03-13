@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   resizeSession: payload => ipcRenderer.invoke("sessions:resize", payload),
   readClipboardText: () => ipcRenderer.invoke("clipboard:read-text"),
   readClipboardFilePaths: () => ipcRenderer.invoke("clipboard:read-file-paths"),
+  openExternal: url => ipcRenderer.invoke("shell:open-external", url),
   resolveClipboardFiles: files =>
     files
       .map(file => {

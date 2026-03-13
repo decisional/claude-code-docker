@@ -90,7 +90,7 @@ function sessionMonogram(name) {
 
 function sessionTitle(session) {
   const branchDisplay = session.currentBranch || session.branch || "";
-  const facts = [runtimeLabel(session.runtime), branchDisplay ? `branch ${branchDisplay}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
+  const facts = [runtimeLabel(session.runtime), branchDisplay ? `branch ${branchDisplay}` : "", session.prNumber ? `PR #${session.prNumber}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
   return [session.name, facts.join(" | "), session.dockerStatus || ""].filter(Boolean).join("\n");
 }
 
@@ -339,6 +339,14 @@ function SessionFacts({ session, className = "session-facts" }) {
           {fact}
         </span>
       ))}
+      {session.prNumber ? (
+        <span
+          className="session-fact session-pr-link"
+          onClick={() => window.desktopApi.openExternal(session.prUrl)}
+        >
+          PR #{session.prNumber}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -814,6 +822,18 @@ export default function App() {
                               {(session.currentBranch || session.branch) ? (
                                 <span title="Current git branch">{session.currentBranch || session.branch}</span>
                               ) : null}
+                              {session.prNumber ? (
+                                <span
+                                  className="session-pr-link"
+                                  title={`Open PR #${session.prNumber}`}
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    window.desktopApi.openExternal(session.prUrl);
+                                  }}
+                                >
+                                  PR #{session.prNumber}
+                                </span>
+                              ) : null}
                               {session.port ? <span>port {session.port}</span> : null}
                             </div>
                           </div>
@@ -909,6 +929,14 @@ export default function App() {
 
                   <div className="terminal-toolbar-aside">
                     {(activeSession.currentBranch || activeSession.branch) ? <span className="terminal-chip">branch {activeSession.currentBranch || activeSession.branch}</span> : null}
+                    {activeSession.prNumber ? (
+                      <span
+                        className="terminal-chip session-pr-link"
+                        onClick={() => window.desktopApi.openExternal(activeSession.prUrl)}
+                      >
+                        PR #{activeSession.prNumber}
+                      </span>
+                    ) : null}
                     {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
                   </div>
                 </div>

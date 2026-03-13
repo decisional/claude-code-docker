@@ -395,6 +395,16 @@ input:focus {
   font-size: 10px;
 }
 
+.session-pr-link {
+  cursor: pointer;
+  color: #60a5fa;
+}
+
+.session-pr-link:hover {
+  text-decoration: underline;
+  color: #93bbfd;
+}
+
 .meta-pill.compact {
   min-width: 34px;
   justify-content: center;
