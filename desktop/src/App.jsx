@@ -355,6 +355,31 @@ function SessionStateDot({ status }) {
   return <span className={`session-state-dot status-${status || "unknown"}`} title={statusLabel(status)} />;
 }
 
+function CopyPromptButton({ prompt }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async e => {
+    e.stopPropagation();
+    await window.desktopApi.writeClipboardText(prompt);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button className={`terminal-chip copy-prompt-btn ${copied ? "copied" : ""}`} type="button" onClick={handleCopy} title="Copy ticket prompt to clipboard">
+      {copied ? (
+        <>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3 3 7-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          Copied
+        </>
+      ) : (
+        <>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.2" /><path d="M11 5V3.5A1.5 1.5 0 009.5 2h-6A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5" stroke="currentColor" strokeWidth="1.2" /></svg>
+          Copy Prompt
+        </>
+      )}
+    </button>
+  );
+}
+
 function SessionFacts({ session, className = "session-facts" }) {
   const branchDisplay = session.currentBranch || session.branch || "";
   const facts = [session.containerName, branchDisplay ? `branch ${branchDisplay}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
@@ -966,7 +991,6 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession })
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedRuntime, setSelectedRuntime] = useState("claude");
   const [submitting, setSubmitting] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -1013,30 +1037,6 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession })
     }
   };
 
-  const buildTicketPrompt = t => {
-    let prompt = `Pick up Linear ticket ${t.identifier}: ${t.title}\n\nURL: ${t.url}`;
-    if (t.description) {
-      prompt += `\n\nDescription:\n${t.description}`;
-    }
-    const comments = t.comments?.nodes || [];
-    if (comments.length > 0) {
-      prompt += "\n\nComments:";
-      for (const c of comments) {
-        prompt += `\n- ${c.user?.name || "Unknown"}: ${c.body}`;
-      }
-    }
-    prompt += "\n\nPlease read the full ticket using the /linear skill if available, then start working on it.";
-    return prompt;
-  };
-
-  const handleCopyPrompt = async () => {
-    if (!ticket) return;
-    const prompt = buildTicketPrompt(ticket);
-    await window.desktopApi.writeClipboardText(prompt);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   const handleSubmit = async () => {
     if (!ticket) return;
     setSubmitting(true);
@@ -1053,10 +1053,6 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession })
           body: c.body,
         })),
       };
-
-      // Copy prompt to clipboard so user can paste it
-      const prompt = buildTicketPrompt(ticket);
-      await window.desktopApi.writeClipboardText(prompt);
 
       await onCreateSession({
         runtime: selectedRuntime,
@@ -1161,9 +1157,6 @@ function LinearTicketBrowser({ open, onClose, sessions, busy, onCreateSession })
               </button>
               <button className="secondary" type="button" onClick={handleSkip} disabled={currentIndex >= tickets.length - 1}>
                 Skip
-              </button>
-              <button className="secondary" type="button" onClick={handleCopyPrompt}>
-                {copied ? "Copied!" : "Copy Prompt"}
               </button>
               <button className="primary" type="button" onClick={handleSubmit} disabled={submitting || busy}>
                 {submitting ? "Starting..." : `Start ${runtimeLabel(selectedRuntime)}`}
@@ -1780,12 +1773,17 @@ export default function App() {
                     ) : null}
                     {activeSession.port ? <span className="terminal-chip">port {activeSession.port}</span> : null}
                     {activeSession.linearTicketId ? (
-                      <span
-                        className="terminal-chip session-linear-link"
-                        onClick={() => activeSession.linearTicketUrl && window.desktopApi.openExternal(activeSession.linearTicketUrl)}
-                      >
-                        {activeSession.linearTicketId}
-                      </span>
+                      <>
+                        <span
+                          className="terminal-chip session-linear-link"
+                          onClick={() => activeSession.linearTicketUrl && window.desktopApi.openExternal(activeSession.linearTicketUrl)}
+                        >
+                          {activeSession.linearTicketId}
+                        </span>
+                        {activeSession.linearTicketPrompt ? (
+                          <CopyPromptButton prompt={activeSession.linearTicketPrompt} />
+                        ) : null}
+                      </>
                     ) : null}
                     <button
                       className={`terminal-chip review-toggle ${reviewPanelOpen ? "active" : ""}`}

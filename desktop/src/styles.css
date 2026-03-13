@@ -1438,6 +1438,27 @@ input:focus {
 
 /* ── Linear Pipeline ── */
 
+.copy-prompt-btn {
+  cursor: pointer;
+  gap: 4px;
+  font-weight: 500;
+  color: var(--accent);
+  border: 1px solid rgba(139, 196, 139, 0.2);
+}
+
+.copy-prompt-btn:hover {
+  background: rgba(139, 196, 139, 0.1);
+}
+
+.copy-prompt-btn.copied {
+  color: var(--success);
+  background: rgba(109, 184, 109, 0.12);
+}
+
+.copy-prompt-btn svg {
+  flex-shrink: 0;
+}
+
 .session-linear-link {
   color: #60a5fa;
   font-weight: 500;

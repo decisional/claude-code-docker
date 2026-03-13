@@ -1104,7 +1104,24 @@ ipcMain.handle("sessions:create-with-ticket", async (_event, payload) => {
     lastOpenedAt: new Date().toISOString(),
     linearTicketId: ticket?.identifier || "",
     linearTicketUrl: ticket?.url || "",
+    linearTicketPrompt: "",
   };
+
+  // Build the prompt for the user to copy-paste
+  if (ticket) {
+    let prompt = `Pick up Linear ticket ${ticket.identifier}: ${ticket.title}\n\nURL: ${ticket.url}`;
+    if (ticket.description) {
+      prompt += `\n\nDescription:\n${ticket.description}`;
+    }
+    if (ticket.comments && ticket.comments.length > 0) {
+      prompt += "\n\nComments:";
+      for (const comment of ticket.comments) {
+        prompt += `\n- ${comment.user}: ${comment.body}`;
+      }
+    }
+    prompt += "\n\nPlease read the full ticket using the /linear skill if available, then start working on it.";
+    session.linearTicketPrompt = prompt;
+  }
 
   upsertSession(session);
   await persistState();
