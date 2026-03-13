@@ -221,10 +221,13 @@ function SessionTerminal({ sessionId, active }) {
         window.desktopApi.sendInput({ sessionId, data: "\x15" });
         return false;
       }
-      // Shift+Enter sends CSI u escape sequence so apps like Claude Code
-      // and Codex can distinguish it from plain Enter and insert a newline.
-      if (event.shiftKey && event.key === "Enter" && event.type === "keydown") {
-        window.desktopApi.sendInput({ sessionId, data: "\x1b[13;2u" });
+      // Shift+Enter inserts a newline instead of submitting.
+      // Send Escape + carriage-return (\x1b\r) which terminal apps like
+      // Claude Code and Codex interpret as Alt+Enter / newline.
+      if (event.shiftKey && event.key === "Enter") {
+        if (event.type === "keydown") {
+          window.desktopApi.sendInput({ sessionId, data: "\x1b\r" });
+        }
         return false;
       }
       return true;
