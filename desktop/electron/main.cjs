@@ -1129,18 +1129,7 @@ ipcMain.handle("sessions:create-with-ticket", async (_event, payload) => {
 
   // Build the prompt for the user to copy-paste
   if (ticket) {
-    let prompt = `Pick up Linear ticket ${ticket.identifier}: ${ticket.title}\n\nURL: ${ticket.url}`;
-    if (ticket.description) {
-      prompt += `\n\nDescription:\n${ticket.description}`;
-    }
-    if (ticket.comments && ticket.comments.length > 0) {
-      prompt += "\n\nComments:";
-      for (const comment of ticket.comments) {
-        prompt += `\n- ${comment.user}: ${comment.body}`;
-      }
-    }
-    prompt += "\n\nPlease read the full ticket using the /linear skill if available, then start working on it.";
-    session.linearTicketPrompt = prompt;
+    session.linearTicketPrompt = `Pick up Linear ticket ${ticket.identifier}: ${ticket.title}\n\nThe Linear API key is at /home/node/.linear-api-key — use it to fetch the full ticket details, all comments, and attachments from the Linear GraphQL API (https://api.linear.app/graphql) before you start working. The ticket identifier is ${ticket.identifier}.`;
   }
 
   upsertSession(session);
