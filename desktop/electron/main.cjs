@@ -251,48 +251,46 @@ async function getContainerGitInfo(containerName) {
   }
 }
 
+// Patterns to skip when extracting thread titles from tmux output.
+// These are setup prompts, menu selections, and other non-task text.
+const THREAD_TITLE_SKIP_RE = /^(hi|hello|hey|yes|no|quit|exit|\d+\.\s|find and fix a bug in @)/i;
+
 async function getContainerThreadTitle(containerName) {
   try {
-    // Find the most recently modified conversation JSONL inside the container,
-    // then extract the first substantive user message as the thread title.
+    // Capture the tmux scrollback from the container's llm-session pane.
+    // Parse user prompts (lines starting with ❯ or ›) and return the first
+    // substantive one (>10 chars, skipping greetings and setup prompts).
     const { stdout } = await runCommand("docker", [
       "exec",
       containerName,
       "bash",
       "-c",
-      `LATEST=$(ls -t /home/node/.claude/projects/*/*.jsonl 2>/dev/null | head -1)
-if [ -z "$LATEST" ]; then exit 0; fi
-head -100 "$LATEST" | python3 -c "
-import sys, json
-for line in sys.stdin:
-    try:
-        obj = json.loads(line.strip())
-        if obj.get('type') == 'user':
-            msg = obj.get('message', {}).get('content', '')
-            text = ''
-            if isinstance(msg, list):
-                for part in msg:
-                    if isinstance(part, dict) and part.get('type') == 'text':
-                        text = part['text']
-                        break
-            else:
-                text = str(msg)
-            text = text.strip()
-            # Skip greetings and very short messages
-            if len(text) > 10:
-                # Truncate to first sentence or 120 chars
-                for sep in ['. ', '\\\\n', '\\n']:
-                    idx = text.find(sep)
-                    if 0 < idx < 120:
-                        text = text[:idx]
-                        break
-                print(text[:120])
-                break
-    except:
-        pass
-" 2>/dev/null`,
+      `tmux capture-pane -t llm-session -p -S -500 2>/dev/null`,
     ]);
-    return stdout.trim();
+
+    const lines = stdout.split("\n");
+    for (const line of lines) {
+      // Claude Code uses ❯, Codex uses ›
+      const promptMatch = line.match(/^[❯›]\s+(.+)$/);
+      if (!promptMatch) continue;
+
+      let text = promptMatch[1].trim();
+      if (text.length <= 10) continue;
+      if (THREAD_TITLE_SKIP_RE.test(text)) continue;
+
+      // Truncate at first sentence boundary or 120 chars
+      for (const sep of [". ", "\n"]) {
+        const idx = text.indexOf(sep);
+        if (idx > 0 && idx < 120) {
+          text = text.slice(0, idx);
+          break;
+        }
+      }
+
+      return text.slice(0, 120);
+    }
+
+    return "";
   } catch {
     return "";
   }
