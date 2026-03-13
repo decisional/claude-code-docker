@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     zsh \
     wget \
     jq \
+    tmux \
     libpq-dev \
     postgresql-client \
     build-essential \

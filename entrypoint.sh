@@ -315,7 +315,6 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
 
         shift
         echo ""
-        exec $LLM_CMD "$@"
     else
         # Launch Claude Code CLI
         LLM_CMD="claude"
@@ -330,7 +329,21 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
 
         shift
         echo ""
-        exec $LLM_CMD "$@"
+    fi
+
+    # Use tmux to persist the CLI session across disconnects (sleep/wake, network drops).
+    # If a tmux session already exists, reattach to it — the CLI process is still alive.
+    # Otherwise, create a new tmux session running the CLI.
+    TMUX_SESSION="llm-session"
+
+    if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+        echo "🔄 Reattaching to existing session..."
+        echo ""
+        exec tmux attach-session -t "$TMUX_SESSION"
+    else
+        echo "▶ Starting new session in tmux..."
+        echo ""
+        exec tmux new-session -s "$TMUX_SESSION" "$LLM_CMD $*"
     fi
 else
     # Execute the command passed to the container as-is
