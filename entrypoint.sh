@@ -315,7 +315,6 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
 
         shift
         echo ""
-        exec $LLM_CMD "$@"
     else
         # Launch Claude Code CLI
         LLM_CMD="claude"
@@ -330,7 +329,35 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
 
         shift
         echo ""
-        exec $LLM_CMD "$@"
+    fi
+
+    # Use tmux to persist the CLI session across disconnects (sleep/wake, network drops).
+    # If a tmux session already exists, reattach to it — the CLI process is still alive.
+    # Otherwise, create a new tmux session running the CLI.
+    TMUX_SESSION="llm-session"
+
+    # Configure tmux: hide status bar so it looks like a normal terminal
+    export TMUX_CONF="/tmp/.tmux.conf"
+    cat > "$TMUX_CONF" <<'TMUXCONF'
+set -g status off
+set -g mouse on
+set -g default-terminal "xterm-256color"
+TMUXCONF
+
+    # On reset (RESET_TO_MAIN=true), kill the old tmux session so we get a fresh CLI.
+    if [ "$RESET_TO_MAIN" = "true" ] && tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
+        echo "🗑  Ending previous session for reset..."
+        tmux -f "$TMUX_CONF" kill-session -t "$TMUX_SESSION" 2>/dev/null || true
+    fi
+
+    if tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
+        echo "🔄 Reattaching to existing session..."
+        echo ""
+        exec tmux -u -f "$TMUX_CONF" attach-session -t "$TMUX_SESSION"
+    else
+        echo "▶ Starting new session in tmux..."
+        echo ""
+        exec tmux -u -f "$TMUX_CONF" new-session -s "$TMUX_SESSION" "$LLM_CMD $*"
     fi
 else
     # Execute the command passed to the container as-is

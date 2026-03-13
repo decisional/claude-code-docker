@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, nativeTheme } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, nativeTheme, powerMonitor } = require("electron");
 const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
@@ -17,6 +17,8 @@ let appState = {
   sessions: [],
 };
 let refreshInterval = null;
+let systemSleeping = false;
+let sessionsAttachedBeforeSleep = [];
 
 const DEFAULT_WINDOW = {
   width: 1480,
@@ -393,15 +395,29 @@ async function startInteractiveSession(session, mode = "start", size = { cols: 1
 
   term.onExit(async ({ exitCode, signal }) => {
     liveSessions.delete(session.id);
+
+    // During system sleep, PTY dies with non-zero exit — treat as detached, not error,
+    // so the session can be automatically reattached on wake.
+    const isSleepDisconnect = systemSleeping || sessionsAttachedBeforeSleep.includes(session.id);
+    const status = isSleepDisconnect || exitCode === 0 ? "detached" : "error";
+    const dockerStatus = isSleepDisconnect
+      ? "Disconnected (system sleep)"
+      : signal
+        ? `PTY exited (${signal})`
+        : `PTY exited (${exitCode})`;
+
     upsertSession({
       ...getSessionById(session.id),
-      status: exitCode === 0 ? "detached" : "error",
-      dockerStatus: signal ? `PTY exited (${signal})` : `PTY exited (${exitCode})`,
+      status,
+      dockerStatus,
       lastExitCode: exitCode,
     });
     await refreshSessionsFromDocker();
     emit("terminal:exit", { sessionId: session.id, exitCode, signal });
-    notifyIfHidden(session.name, `Session exited${typeof exitCode === "number" ? ` with code ${exitCode}` : ""}.`);
+
+    if (!isSleepDisconnect) {
+      notifyIfHidden(session.name, `Session exited${typeof exitCode === "number" ? ` with code ${exitCode}` : ""}.`);
+    }
   });
 
   return getSessionById(session.id);
@@ -479,6 +495,49 @@ app.whenReady().then(async () => {
   refreshInterval = setInterval(() => {
     refreshSessionsFromDocker().catch(() => {});
   }, 5000);
+});
+
+powerMonitor.on("suspend", () => {
+  systemSleeping = true;
+  sessionsAttachedBeforeSleep = [];
+  liveSessions.forEach((_live, sessionId) => {
+    sessionsAttachedBeforeSleep.push(sessionId);
+  });
+});
+
+powerMonitor.on("resume", () => {
+  systemSleeping = false;
+  const toReattach = [...sessionsAttachedBeforeSleep];
+  sessionsAttachedBeforeSleep = [];
+
+  // Give the system a moment to restore network/Docker after wake
+  setTimeout(async () => {
+    await refreshSessionsFromDocker().catch(() => {});
+
+    for (const sessionId of toReattach) {
+      // Only reattach if the PTY is gone but the container is still running
+      if (liveSessions.has(sessionId)) {
+        continue;
+      }
+
+      const session = getSessionById(sessionId);
+      if (!session) {
+        continue;
+      }
+
+      // Check if the Docker container is still running
+      if (session.status !== "running" && session.status !== "detached") {
+        continue;
+      }
+
+      try {
+        await startInteractiveSession(session, "start");
+        emit("sessions:changed", appState.sessions);
+      } catch {
+        // Container may have stopped during sleep; ignore and let user handle manually.
+      }
+    }
+  }, 3000);
 });
 
 app.on("window-all-closed", () => {
