@@ -4,6 +4,8 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
 const EMPTY_SESSIONS = [];
+// Registry so parent can focus a terminal by session ID
+const terminalRegistry = new Map();
 const SIDEBAR_STORAGE_KEY = "autodex-desktop:sidebar-collapsed";
 const SIDEBAR_SHORTCUT_KEY = "b";
 
@@ -176,6 +178,7 @@ function SessionTerminal({ sessionId, active }) {
 
     terminalRef.current = terminal;
     fitRef.current = fit;
+    terminalRegistry.set(sessionId, terminal);
 
     const onData = window.desktopApi.onTerminalData(({ sessionId: targetSessionId, data }) => {
       if (targetSessionId === sessionId) {
@@ -238,6 +241,7 @@ function SessionTerminal({ sessionId, active }) {
       }
 
       onData();
+      terminalRegistry.delete(sessionId);
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = null;
@@ -637,13 +641,13 @@ export default function App() {
     };
   }, []);
 
-  const focusActiveTerminal = () => {
+  const focusTerminal = sessionId => {
     setTimeout(() => {
-      const active = document.querySelector(".terminal-host.active textarea");
-      if (active) {
-        active.focus();
+      const terminal = terminalRegistry.get(sessionId);
+      if (terminal) {
+        terminal.focus();
       }
-    }, 100);
+    }, 150);
   };
 
   const selectSession = async sessionId => {
@@ -678,7 +682,7 @@ export default function App() {
       }
     }
 
-    focusActiveTerminal();
+    focusTerminal(sessionId);
   };
 
   const handleCreate = async payload => {
@@ -893,7 +897,7 @@ export default function App() {
                   <button
                     className="secondary"
                     type="button"
-                    onClick={() => perform(window.desktopApi.resetSession, { sessionId: activeSession.id }, () => selectSession(activeSession.id))}
+                    onClick={() => perform(window.desktopApi.resetSession, { sessionId: activeSession.id }, () => focusTerminal(activeSession.id))}
                     disabled={busy}
                   >
                     Reset
