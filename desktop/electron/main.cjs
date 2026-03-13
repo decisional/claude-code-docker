@@ -778,6 +778,21 @@ ipcMain.handle("shell:open-external", async (_event, url) => {
   }
 });
 
+ipcMain.handle("dialog:confirm", async (_event, options) => {
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: "question",
+    buttons: options.buttons || ["Cancel", "OK"],
+    defaultId: options.defaultId ?? 0,
+    message: options.message || "Are you sure?",
+  });
+  return result.response === 1;
+});
+
+ipcMain.handle("docker:prune", async () => {
+  const { stdout } = await runCommand("docker", ["system", "prune", "-f"]);
+  return stdout.trim();
+});
+
 ipcMain.handle("sessions:stop", async (_event, payload) => {
   const session = getSessionById(payload.sessionId);
   if (!session) {

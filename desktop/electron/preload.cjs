@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
   readClipboardText: () => ipcRenderer.invoke("clipboard:read-text"),
   readClipboardFilePaths: () => ipcRenderer.invoke("clipboard:read-file-paths"),
   openExternal: url => ipcRenderer.invoke("shell:open-external", url),
+  confirmDialog: options => ipcRenderer.invoke("dialog:confirm", options),
+  dockerPrune: () => ipcRenderer.invoke("docker:prune"),
   resolveClipboardFiles: files =>
     files
       .map(file => {

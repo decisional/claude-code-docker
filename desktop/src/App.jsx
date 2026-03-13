@@ -896,6 +896,34 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          <div className="sidebar-footer">
+            <button
+              className="prune-button"
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                const confirmed = await window.desktopApi.confirmDialog({
+                  message: "Run docker system prune -f?\n\nThis removes unused containers, networks, and dangling images.",
+                  buttons: ["Cancel", "Prune"],
+                  defaultId: 0,
+                });
+                if (confirmed) {
+                  try {
+                    setBusy(true);
+                    await window.desktopApi.dockerPrune();
+                  } catch (pruneError) {
+                    setError(pruneError.message || "Prune failed.");
+                  } finally {
+                    setBusy(false);
+                  }
+                }
+              }}
+              title="Docker system prune"
+            >
+              {sidebarCollapsed ? "P" : "Prune Docker"}
+            </button>
+          </div>
         </aside>
 
         <main className="main-pane">
