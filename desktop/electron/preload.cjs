@@ -51,4 +51,9 @@ contextBridge.exposeInMainWorld("desktopApi", {
     ipcRenderer.on("sessions:changed", listener);
     return () => ipcRenderer.removeListener("sessions:changed", listener);
   },
+  onAppResume: handler => {
+    const listener = () => handler();
+    ipcRenderer.on("app:resume", listener);
+    return () => ipcRenderer.removeListener("app:resume", listener);
+  },
 });

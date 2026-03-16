@@ -10,6 +10,10 @@ const SIDEBAR_STORAGE_KEY = "autodex-desktop:sidebar-collapsed";
 const REVIEW_PANEL_STORAGE_KEY = "autodex-desktop:review-panel-open";
 const LINEAR_KEY_STORAGE_KEY = "autodex-desktop:linear-configured";
 const SIDEBAR_SHORTCUT_KEY = "b";
+const MOUSE_MODE_CODES = ["9", "1000", "1002", "1003", "1004", "1005", "1006", "1015", "1016"];
+const MOUSE_MODE_SEQUENCE_RE = new RegExp(`\\x1b\\[\\?(?:${MOUSE_MODE_CODES.join("|")})[hl]`, "g");
+const MOUSE_MODE_SEQUENCES = MOUSE_MODE_CODES.flatMap(code => [`\x1b[?${code}h`, `\x1b[?${code}l`]);
+const MOUSE_MODE_MAX_SEQUENCE_LENGTH = Math.max(...MOUSE_MODE_SEQUENCES.map(sequence => sequence.length));
 
 const STATUS_LABELS = {
   attached: "Attached",
@@ -106,6 +110,34 @@ function formatPathsForTerminal(paths) {
   return paths.map(escapePathForShell).filter(Boolean).join(" ");
 }
 
+function splitIncompleteMouseModeSequence(value) {
+  const start = Math.max(0, value.length - MOUSE_MODE_MAX_SEQUENCE_LENGTH + 1);
+
+  for (let index = start; index < value.length; index += 1) {
+    if (value[index] !== "\x1b") {
+      continue;
+    }
+
+    const suffix = value.slice(index);
+    const isIncompleteMouseModeSequence = MOUSE_MODE_SEQUENCES.some(sequence => sequence.startsWith(suffix) && suffix.length < sequence.length);
+
+    if (isIncompleteMouseModeSequence) {
+      return [value.slice(0, index), suffix];
+    }
+  }
+
+  return [value, ""];
+}
+
+function stripMouseModeSequences(value, carry = "") {
+  const combined = `${carry}${value}`;
+  const [complete, pending] = splitIncompleteMouseModeSequence(combined);
+  return {
+    data: complete.replace(MOUSE_MODE_SEQUENCE_RE, ""),
+    pending,
+  };
+}
+
 function clipboardPathsFromText(text) {
   const entries = text
     .split(/\r?\n/)
@@ -142,10 +174,62 @@ function SessionTerminal({ sessionId, active }) {
   const activeRef = useRef(active);
   const resizeTimerRef = useRef(null);
   const lastResizeRef = useRef({ cols: 0, rows: 0 });
+  const mouseModeCarryRef = useRef("");
 
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+
+  const syncTerminalSize = () => {
+    if (!activeRef.current || !containerRef.current || !fitRef.current || !terminalRef.current) {
+      return;
+    }
+
+    const { clientWidth, clientHeight } = containerRef.current;
+    if (clientWidth < 120 || clientHeight < 120) {
+      return;
+    }
+
+    try {
+      fitRef.current.fit();
+
+      const nextSize = {
+        cols: terminalRef.current.cols,
+        rows: terminalRef.current.rows,
+      };
+
+      if (nextSize.cols <= 0 || nextSize.rows <= 0) {
+        return;
+      }
+
+      if (lastResizeRef.current.cols === nextSize.cols && lastResizeRef.current.rows === nextSize.rows) {
+        return;
+      }
+
+      lastResizeRef.current = nextSize;
+      window.desktopApi.resizeSession({
+        sessionId,
+        cols: nextSize.cols,
+        rows: nextSize.rows,
+      });
+    } catch {
+      // Ignore resize noise during teardown.
+    }
+  };
+
+  const refreshTerminalView = () => {
+    if (!activeRef.current || !terminalRef.current) {
+      return;
+    }
+
+    syncTerminalSize();
+
+    try {
+      terminalRef.current.refresh(0, Math.max(terminalRef.current.rows - 1, 0));
+    } catch {
+      // Ignore redraw noise during teardown.
+    }
+  };
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -191,14 +275,18 @@ function SessionTerminal({ sessionId, active }) {
     fitRef.current = fit;
     terminalRegistry.set(sessionId, terminal);
 
-    // Strip mouse-mode enable sequences so xterm.js never captures mouse
-    // events from the app (Claude Code / Codex TUI). This keeps text
-    // selection and copy working at all times.
-    const MOUSE_MODE_RE = /\x1b\[\?(?:9|1000|1002|1003|1004|1005|1006|1015|1016)h/g;
-
     const onData = window.desktopApi.onTerminalData(({ sessionId: targetSessionId, data }) => {
       if (targetSessionId === sessionId) {
-        terminal.write(typeof data === "string" ? data.replace(MOUSE_MODE_RE, "") : data);
+        if (typeof data !== "string") {
+          terminal.write(data);
+          return;
+        }
+
+        const sanitized = stripMouseModeSequences(data, mouseModeCarryRef.current);
+        mouseModeCarryRef.current = sanitized.pending;
+        if (sanitized.data) {
+          terminal.write(sanitized.data);
+        }
       }
     });
 
@@ -295,6 +383,7 @@ function SessionTerminal({ sessionId, active }) {
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = null;
+      mouseModeCarryRef.current = "";
     };
   }, [sessionId]);
 
@@ -303,43 +392,6 @@ function SessionTerminal({ sessionId, active }) {
       return undefined;
     }
 
-    const resize = () => {
-      if (!activeRef.current || !containerRef.current || !fitRef.current || !terminalRef.current) {
-        return;
-      }
-
-      const { clientWidth, clientHeight } = containerRef.current;
-      if (clientWidth < 120 || clientHeight < 120) {
-        return;
-      }
-
-      try {
-        fitRef.current.fit();
-
-        const nextSize = {
-          cols: terminalRef.current.cols,
-          rows: terminalRef.current.rows,
-        };
-
-        if (nextSize.cols <= 0 || nextSize.rows <= 0) {
-          return;
-        }
-
-        if (lastResizeRef.current.cols === nextSize.cols && lastResizeRef.current.rows === nextSize.rows) {
-          return;
-        }
-
-        lastResizeRef.current = nextSize;
-        window.desktopApi.resizeSession({
-          sessionId,
-          cols: nextSize.cols,
-          rows: nextSize.rows,
-        });
-      } catch {
-        // Ignore resize noise during teardown.
-      }
-    };
-
     const scheduleResize = delay => {
       if (resizeTimerRef.current) {
         clearTimeout(resizeTimerRef.current);
@@ -347,7 +399,7 @@ function SessionTerminal({ sessionId, active }) {
 
       resizeTimerRef.current = setTimeout(() => {
         resizeTimerRef.current = null;
-        resize();
+        syncTerminalSize();
         if (terminalRef.current) {
           terminalRef.current.focus();
         }
@@ -369,6 +421,60 @@ function SessionTerminal({ sessionId, active }) {
       }
     };
   }, [active, sessionId]);
+
+  useEffect(() => {
+    if (!active || !containerRef.current) {
+      return undefined;
+    }
+
+    const restoreTerminal = () => {
+      if (!activeRef.current || !terminalRef.current) {
+        return;
+      }
+
+      refreshTerminalView();
+      terminalRef.current.focus();
+    };
+
+    const handleWindowFocus = () => {
+      window.requestAnimationFrame(restoreTerminal);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        handleWindowFocus();
+      }
+    };
+
+    const handleAppResume = () => {
+      window.setTimeout(restoreTerminal, 120);
+    };
+
+    const handlePointerDown = () => {
+      restoreTerminal();
+    };
+
+    const handleWheel = () => {
+      if (document.activeElement !== terminalRef.current?.textarea) {
+        restoreTerminal();
+      }
+    };
+
+    const container = containerRef.current;
+    const offResume = window.desktopApi.onAppResume(handleAppResume);
+    window.addEventListener("focus", handleWindowFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    container.addEventListener("pointerdown", handlePointerDown);
+    container.addEventListener("wheel", handleWheel, { passive: true });
+
+    return () => {
+      offResume();
+      window.removeEventListener("focus", handleWindowFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      container.removeEventListener("pointerdown", handlePointerDown);
+      container.removeEventListener("wheel", handleWheel);
+    };
+  }, [active]);
 
   return <div className={`terminal-host ${active ? "active" : "hidden"}`} ref={containerRef} />;
 }

@@ -911,6 +911,7 @@ powerMonitor.on("resume", () => {
   systemSleeping = false;
   const toReattach = [...sessionsAttachedBeforeSleep];
   sessionsAttachedBeforeSleep = [];
+  emit("app:resume");
 
   // Give the system a moment to restore network/Docker after wake
   setTimeout(async () => {
