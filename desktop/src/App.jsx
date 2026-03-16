@@ -11,9 +11,10 @@ const REVIEW_PANEL_STORAGE_KEY = "autodex-desktop:review-panel-open";
 const LINEAR_KEY_STORAGE_KEY = "autodex-desktop:linear-configured";
 const SIDEBAR_SHORTCUT_KEY = "b";
 const MOUSE_MODE_CODES = ["9", "1000", "1002", "1003", "1004", "1005", "1006", "1015", "1016"];
-const MOUSE_MODE_SEQUENCE_RE = new RegExp(`\\x1b\\[\\?(?:${MOUSE_MODE_CODES.join("|")})[hl]`, "g");
-const MOUSE_MODE_SEQUENCES = MOUSE_MODE_CODES.flatMap(code => [`\x1b[?${code}h`, `\x1b[?${code}l`]);
-const MOUSE_MODE_MAX_SEQUENCE_LENGTH = Math.max(...MOUSE_MODE_SEQUENCES.map(sequence => sequence.length));
+const MOUSE_MODE_CODE_SET = new Set(MOUSE_MODE_CODES);
+const PRIVATE_MODE_SEQUENCE_RE = /\x1b\[\?([0-9;]+)([hl])/g;
+const DISABLE_MOUSE_MODE_SEQUENCE = MOUSE_MODE_CODES.map(code => `\x1b[?${code}l`).join("");
+const PRIVATE_MODE_PREFIX_RE = /\x1b\[\?[0-9;]*$/;
 
 const STATUS_LABELS = {
   attached: "Attached",
@@ -110,30 +111,35 @@ function formatPathsForTerminal(paths) {
   return paths.map(escapePathForShell).filter(Boolean).join(" ");
 }
 
-function splitIncompleteMouseModeSequence(value) {
-  const start = Math.max(0, value.length - MOUSE_MODE_MAX_SEQUENCE_LENGTH + 1);
-
-  for (let index = start; index < value.length; index += 1) {
-    if (value[index] !== "\x1b") {
-      continue;
-    }
-
-    const suffix = value.slice(index);
-    const isIncompleteMouseModeSequence = MOUSE_MODE_SEQUENCES.some(sequence => sequence.startsWith(suffix) && suffix.length < sequence.length);
-
-    if (isIncompleteMouseModeSequence) {
-      return [value.slice(0, index), suffix];
-    }
+function splitIncompletePrivateModeSequence(value) {
+  const match = value.match(PRIVATE_MODE_PREFIX_RE);
+  if (!match || typeof match.index !== "number") {
+    return [value, ""];
   }
 
-  return [value, ""];
+  return [value.slice(0, match.index), match[0]];
+}
+
+function stripMouseModeSequence(sequence, codes, suffix) {
+  const nextCodes = codes.split(";").filter(Boolean);
+  const remainingCodes = nextCodes.filter(code => !MOUSE_MODE_CODE_SET.has(code));
+
+  if (remainingCodes.length === nextCodes.length) {
+    return sequence;
+  }
+
+  if (remainingCodes.length === 0) {
+    return "";
+  }
+
+  return `\x1b[?${remainingCodes.join(";")}${suffix}`;
 }
 
 function stripMouseModeSequences(value, carry = "") {
   const combined = `${carry}${value}`;
-  const [complete, pending] = splitIncompleteMouseModeSequence(combined);
+  const [complete, pending] = splitIncompletePrivateModeSequence(combined);
   return {
-    data: complete.replace(MOUSE_MODE_SEQUENCE_RE, ""),
+    data: complete.replace(PRIVATE_MODE_SEQUENCE_RE, stripMouseModeSequence),
     pending,
   };
 }
@@ -175,6 +181,7 @@ function SessionTerminal({ sessionId, active }) {
   const resizeTimerRef = useRef(null);
   const lastResizeRef = useRef({ cols: 0, rows: 0 });
   const mouseModeCarryRef = useRef("");
+  const restoreTimersRef = useRef([]);
 
   useEffect(() => {
     activeRef.current = active;
@@ -225,6 +232,7 @@ function SessionTerminal({ sessionId, active }) {
     syncTerminalSize();
 
     try {
+      terminalRef.current.clearTextureAtlas();
       terminalRef.current.refresh(0, Math.max(terminalRef.current.rows - 1, 0));
     } catch {
       // Ignore redraw noise during teardown.
@@ -275,6 +283,12 @@ function SessionTerminal({ sessionId, active }) {
     fitRef.current = fit;
     terminalRegistry.set(sessionId, terminal);
 
+    const enforceTerminalState = () => {
+      if (terminal.modes.mouseTrackingMode !== "none") {
+        terminal.write(DISABLE_MOUSE_MODE_SEQUENCE);
+      }
+    };
+
     const onData = window.desktopApi.onTerminalData(({ sessionId: targetSessionId, data }) => {
       if (targetSessionId === sessionId) {
         if (typeof data !== "string") {
@@ -285,8 +299,11 @@ function SessionTerminal({ sessionId, active }) {
         const sanitized = stripMouseModeSequences(data, mouseModeCarryRef.current);
         mouseModeCarryRef.current = sanitized.pending;
         if (sanitized.data) {
-          terminal.write(sanitized.data);
+          terminal.write(sanitized.data, enforceTerminalState);
+          return;
         }
+
+        enforceTerminalState();
       }
     });
 
@@ -378,6 +395,8 @@ function SessionTerminal({ sessionId, active }) {
         pasteTarget.removeEventListener("paste", handlePaste);
       }
 
+      restoreTimersRef.current.forEach(clearTimeout);
+      restoreTimersRef.current = [];
       onData();
       terminalRegistry.delete(sessionId);
       terminal.dispose();
@@ -427,17 +446,31 @@ function SessionTerminal({ sessionId, active }) {
       return undefined;
     }
 
+    const scheduleRestore = delays => {
+      restoreTimersRef.current.forEach(clearTimeout);
+      restoreTimersRef.current = delays.map(delay =>
+        window.setTimeout(() => {
+          restoreTerminal();
+        }, delay)
+      );
+    };
+
     const restoreTerminal = () => {
       if (!activeRef.current || !terminalRef.current) {
         return;
       }
 
       refreshTerminalView();
+      if (terminalRef.current.modes.mouseTrackingMode !== "none") {
+        terminalRef.current.write(DISABLE_MOUSE_MODE_SEQUENCE);
+      }
       terminalRef.current.focus();
     };
 
     const handleWindowFocus = () => {
-      window.requestAnimationFrame(restoreTerminal);
+      window.requestAnimationFrame(() => {
+        scheduleRestore([0, 120, 360]);
+      });
     };
 
     const handleVisibilityChange = () => {
@@ -447,7 +480,7 @@ function SessionTerminal({ sessionId, active }) {
     };
 
     const handleAppResume = () => {
-      window.setTimeout(restoreTerminal, 120);
+      scheduleRestore([120, 320, 700]);
     };
 
     const handlePointerDown = () => {
@@ -468,6 +501,8 @@ function SessionTerminal({ sessionId, active }) {
     container.addEventListener("wheel", handleWheel, { passive: true });
 
     return () => {
+      restoreTimersRef.current.forEach(clearTimeout);
+      restoreTimersRef.current = [];
       offResume();
       window.removeEventListener("focus", handleWindowFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
