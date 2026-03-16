@@ -11,6 +11,10 @@ const liveSessions = new Map();
 const notificationCooldowns = new Map();
 // Cache PR lookups per session: sessionId -> { branch, prNumber, prUrl }
 const prCache = new Map();
+// Set of session IDs currently being removed — resize events are suppressed for
+// all *other* sessions while a removal is in progress to avoid layout-shift
+// triggered resizes that cause tmux reflow / scrollback loss.
+const removingSessionIds = new Set();
 let terminalTabCounter = 0;
 let mainWindow = null;
 let storePath = "";
@@ -1094,6 +1098,11 @@ ipcMain.handle("sessions:input", async (_event, payload) => {
 });
 
 ipcMain.handle("sessions:resize", async (_event, payload) => {
+  // While a session is being removed, layout shifts can trigger spurious resize
+  // events on sibling terminals.  Suppress them to avoid tmux reflow / text loss.
+  if (removingSessionIds.size > 0 && !removingSessionIds.has(payload.sessionId)) {
+    return false;
+  }
   const live = liveSessions.get(payload.sessionId);
   if (!live) {
     return false;
@@ -1333,6 +1342,11 @@ ipcMain.handle("sessions:remove", async (_event, payload) => {
     return true;
   }
 
+  // Mark session as being removed so resize events on sibling sessions are
+  // suppressed during the removal window (layout shifts can cause spurious
+  // resizes that reflow tmux and lose scrollback in other terminals).
+  removingSessionIds.add(session.id);
+
   const live = liveSessions.get(session.id);
   if (live) {
     try {
@@ -1346,7 +1360,18 @@ ipcMain.handle("sessions:remove", async (_event, payload) => {
   await runDetachedScript(session.runtime, "remove", session.name);
   removeSessionById(session.id);
   await persistState();
-  await refreshSessionsFromDocker();
+  // Emit the updated sessions list immediately without running docker exec on
+  // every remaining container.  The periodic 5-second refresh will pick up
+  // git/PR/diff info later.  This avoids triggering heavy re-renders (and
+  // resize cascades) on sibling terminals right when the layout is shifting.
+  emit("sessions:changed", appState.sessions);
+
+  // Clear the removal guard after a short window so that any queued resize
+  // events from the layout shift are dropped.
+  setTimeout(() => {
+    removingSessionIds.delete(session.id);
+  }, 500);
+
   return true;
 });
 
