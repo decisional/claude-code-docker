@@ -963,9 +963,17 @@ app.on("before-quit", () => {
     clearInterval(refreshInterval);
   }
 
-  liveSessions.forEach(({ term }) => {
+  // Send SIGHUP instead of SIGKILL so that tmux inside Docker containers
+  // receives a clean detach signal rather than an abrupt kill.  This keeps the
+  // tmux session alive for fast re-attach when the app restarts.
+  liveSessions.forEach(({ term }, sessionId) => {
     try {
-      term.kill();
+      // Terminal sessions (local shells) can be killed directly.
+      if (sessionId.startsWith("terminal:")) {
+        term.kill();
+      } else {
+        process.kill(term.pid, "SIGHUP");
+      }
     } catch {
       // Ignore shutdown race.
     }
