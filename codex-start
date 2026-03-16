@@ -1,6 +1,6 @@
 #!/bin/bash
 # Start a new Codex CLI instance or attach to existing one
-# Usage: ./codex-start [instance-name] [--branch branch-name]
+# Usage: ./codex-start [instance-name] [--branch branch-name] [--tmux]
 # If no name provided, generates a random name like "happy-tiger"
 
 set -e
@@ -18,12 +18,17 @@ fi
 # Parse arguments
 INSTANCE_NAME=""
 GIT_BRANCH_OVERRIDE=""
+USE_TMUX="false"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --branch)
             GIT_BRANCH_OVERRIDE="$2"
             shift 2
+            ;;
+        --tmux)
+            USE_TMUX="true"
+            shift
             ;;
         *)
             INSTANCE_NAME="$1"
@@ -65,7 +70,7 @@ fi
 echo ""
 
 # Build environment override for branch if specified
-ENV_OVERRIDE="-e LLM_TYPE=codex"
+ENV_OVERRIDE="-e LLM_TYPE=codex -e USE_TMUX=$USE_TMUX"
 VOLUME_OVERRIDE=""
 if [ -n "$GIT_BRANCH_OVERRIDE" ]; then
     ENV_OVERRIDE="$ENV_OVERRIDE -e GIT_BRANCH=$GIT_BRANCH_OVERRIDE"
