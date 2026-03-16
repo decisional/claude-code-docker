@@ -528,7 +528,7 @@ async function startInteractiveSession(session, mode = "start", size) {
 
   const scripts = sessionScripts(session.runtime);
   const scriptPath = mode === "reset" ? scripts.reset : scripts.start;
-  const args = [scriptPath, session.name];
+  const args = [scriptPath, session.name, "--tmux"];
 
   if (mode === "start" && session.branch) {
     args.push("--branch", session.branch);

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Start a new Claude Code instance or attach to existing one
-# Usage: ./cc-start [instance-name] [--branch branch-name] [--port [port-number]]
+# Usage: ./cc-start [instance-name] [--branch branch-name] [--port [port-number]] [--tmux]
 # If no name provided, generates a random name like "happy-tiger"
 # No port forwarding by default. Use --port to expose a dev server port (default: 3000).
 
@@ -20,6 +20,7 @@ fi
 INSTANCE_NAME=""
 GIT_BRANCH_OVERRIDE=""
 PORT_OVERRIDE=""
+USE_TMUX="false"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -36,6 +37,10 @@ while [[ $# -gt 0 ]]; do
                 PORT_OVERRIDE="3000"
                 shift
             fi
+            ;;
+        --tmux)
+            USE_TMUX="true"
+            shift
             ;;
         *)
             INSTANCE_NAME="$1"
@@ -76,6 +81,9 @@ if [ -n "$GIT_BRANCH_OVERRIDE" ]; then
 fi
 if [ -n "$PORT_OVERRIDE" ]; then
     RUN_EXTRA_FLAGS="$RUN_EXTRA_FLAGS -e DEV_PORT=$PORT_OVERRIDE --publish $PORT_OVERRIDE:$PORT_OVERRIDE"
+fi
+if [ "$USE_TMUX" = "true" ]; then
+    RUN_EXTRA_FLAGS="$RUN_EXTRA_FLAGS -e USE_TMUX=true"
 fi
 if [ -n "$HOST_MOUNT_DIR" ] && [ -d "$HOST_MOUNT_DIR" ]; then
     RUN_EXTRA_FLAGS="$RUN_EXTRA_FLAGS -v ${HOST_MOUNT_DIR}:${HOST_MOUNT_DIR}:ro"
@@ -129,7 +137,7 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
 
     echo "  Connecting to existing instance..."
     echo ""
-    docker-compose -p "$PROJECT_NAME" exec -it claude-code /entrypoint.sh claude
+    docker-compose -p "$PROJECT_NAME" exec -e USE_TMUX="$USE_TMUX" -it claude-code /entrypoint.sh claude
 else
     # Check if container exists but is stopped
     if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
@@ -211,5 +219,5 @@ else
 
     echo "  Launching Claude Code..."
     echo ""
-    docker-compose -p "$PROJECT_NAME" exec -it claude-code /entrypoint.sh claude
+    docker-compose -p "$PROJECT_NAME" exec -e USE_TMUX="$USE_TMUX" -it claude-code /entrypoint.sh claude
 fi
