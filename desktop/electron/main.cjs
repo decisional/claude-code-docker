@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, nativeTheme, powerMonitor, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, nativeTheme, powerMonitor, shell } = require("electron");
 const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
@@ -7,8 +7,10 @@ const https = require("https");
 const { execFile, spawn } = require("child_process");
 const pty = require("node-pty");
 
+const MAX_TERMINAL_HISTORY_BYTES = 8 * 1024 * 1024;
 const liveSessions = new Map();
 const notificationCooldowns = new Map();
+const terminalHistory = new Map();
 // Cache PR lookups per session: sessionId -> { branch, prNumber, prUrl }
 const prCache = new Map();
 let terminalTabCounter = 0;
@@ -134,6 +136,61 @@ function dedupeSessions(sessions) {
   });
 }
 
+function appendTerminalHistory(sessionId, data) {
+  if (!sessionId || typeof data !== "string" || data.length === 0) {
+    return 0;
+  }
+
+  let entry = terminalHistory.get(sessionId);
+  if (!entry) {
+    entry = { lastSeq: 0, totalBytes: 0, chunks: [] };
+  }
+
+  const bytes = Buffer.byteLength(data, "utf8");
+  entry.lastSeq += 1;
+  entry.totalBytes += bytes;
+  entry.chunks.push({ seq: entry.lastSeq, bytes, data });
+
+  while (entry.totalBytes > MAX_TERMINAL_HISTORY_BYTES && entry.chunks.length > 1) {
+    const removed = entry.chunks.shift();
+    entry.totalBytes -= removed ? removed.bytes : 0;
+  }
+
+  terminalHistory.set(sessionId, entry);
+  return entry.lastSeq;
+}
+
+function readTerminalHistory(sessionId) {
+  const entry = terminalHistory.get(sessionId);
+  if (!entry) {
+    return { seq: 0, data: "" };
+  }
+
+  return {
+    seq: entry.lastSeq,
+    data: entry.chunks.map(chunk => chunk.data).join(""),
+  };
+}
+
+function clearTerminalHistory(sessionId) {
+  if (!sessionId) {
+    return;
+  }
+  terminalHistory.delete(sessionId);
+}
+
+function clearTerminalHistoryForSession(sessionId) {
+  if (!sessionId) {
+    return;
+  }
+
+  for (const historyKey of terminalHistory.keys()) {
+    if (historyKey === sessionId || historyKey.startsWith(`${sessionId}:`)) {
+      terminalHistory.delete(historyKey);
+    }
+  }
+}
+
 function sortedSessions(sessions) {
   return [...sessions].sort((a, b) => {
     return (b.createdAt || "").localeCompare(a.createdAt || "");
@@ -175,6 +232,7 @@ function upsertSession(partial) {
 }
 
 function removeSessionById(sessionId) {
+  clearTerminalHistoryForSession(sessionId);
   appState.sessions = appState.sessions.filter(session => session.id !== sessionId);
 }
 
@@ -187,6 +245,54 @@ function emit(channel, payload) {
     return;
   }
   mainWindow.webContents.send(channel, payload);
+}
+
+function requestCloseActiveSession() {
+  emit("app:close-active-session");
+}
+
+function installApplicationMenu() {
+  const fileMenu = {
+    label: "File",
+    submenu: [
+      {
+        label: "Close Session",
+        accelerator: "CmdOrCtrl+W",
+        click: () => requestCloseActiveSession(),
+      },
+    ],
+  };
+
+  if (process.platform === "darwin") {
+    fileMenu.submenu.push(
+      { type: "separator" },
+      { label: "Close Window", accelerator: "CmdOrCtrl+Shift+W", role: "close" }
+    );
+  } else {
+    fileMenu.submenu.push({ type: "separator" }, { role: "quit" });
+  }
+
+  const windowMenu = process.platform === "darwin"
+    ? {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+        { type: "separator" },
+        { role: "front" },
+      ],
+    }
+    : { role: "windowMenu" };
+
+  const template = [
+    ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
+    fileMenu,
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    windowMenu,
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 function buildRuntimeEnv(overrides = {}) {
@@ -525,6 +631,9 @@ async function startInteractiveSession(session, mode = "start", size) {
   if (existing) {
     return session;
   }
+  if (mode === "reset") {
+    clearTerminalHistory(session.id);
+  }
 
   const scripts = sessionScripts(session.runtime);
   const scriptPath = mode === "reset" ? scripts.reset : scripts.start;
@@ -577,7 +686,8 @@ async function startInteractiveSession(session, mode = "start", size) {
   emit("sessions:changed", appState.sessions);
 
   term.onData(data => {
-    emit("terminal:data", { sessionId: session.id, data });
+    const seq = appendTerminalHistory(session.id, data);
+    emit("terminal:data", { sessionId: session.id, seq, data });
 
     if (!mainWindow?.isFocused()) {
       notifyIfHidden(session.name, "Session received output.", {
@@ -629,6 +739,7 @@ function startTerminalTab(sessionId, tabId, size) {
   if (liveSessions.has(liveKey)) {
     return;
   }
+  clearTerminalHistory(liveKey);
 
   const userShell = process.env.SHELL || "/bin/zsh";
   const term = pty.spawn(userShell, ["--login"], {
@@ -642,7 +753,8 @@ function startTerminalTab(sessionId, tabId, size) {
   liveSessions.set(liveKey, { term });
 
   term.onData(data => {
-    emit("terminal:data", { sessionId: liveKey, data });
+    const seq = appendTerminalHistory(liveKey, data);
+    emit("terminal:data", { sessionId: liveKey, seq, data });
   });
 
   term.onExit(async () => {
@@ -891,6 +1003,7 @@ async function injectLinearKeyIntoContainer(containerName, apiKey) {
 
 app.whenReady().then(async () => {
   await ensureStateLoaded();
+  installApplicationMenu();
   createWindow();
   await refreshSessionsFromDocker();
 
@@ -1000,6 +1113,14 @@ ipcMain.handle("sessions:list", async () => {
   return refreshSessionsFromDocker();
 });
 
+ipcMain.handle("sessions:get-terminal-history", async (_event, payload) => {
+  const sessionId = String(payload?.sessionId || "");
+  if (!sessionId) {
+    return { seq: 0, data: "" };
+  }
+  return readTerminalHistory(sessionId);
+});
+
 ipcMain.handle("sessions:create", async (_event, payload) => {
   await ensureStateLoaded();
   const name = String(payload.name || "").trim();
@@ -1069,6 +1190,7 @@ ipcMain.handle("sessions:reset", async (_event, payload) => {
   if (!session) {
     throw new Error("Session not found.");
   }
+  clearTerminalHistory(session.id);
 
   const live = liveSessions.get(session.id);
   if (live) {
@@ -1373,6 +1495,7 @@ ipcMain.handle("sessions:close-tab", async (_event, payload) => {
   }
 
   const liveKey = `${session.id}:${payload.tabId}`;
+  clearTerminalHistory(liveKey);
   const live = liveSessions.get(liveKey);
   if (live) {
     try { live.term.kill(); } catch {}

@@ -179,7 +179,7 @@ function SessionTerminal({ sessionId, active }) {
         magenta: "#c084fc",
         brightMagenta: "#d8b4fe",
       },
-      scrollback: 10000,
+      scrollback: 200000,
       allowTransparency: false,
     });
     const fit = new FitAddon();
@@ -195,12 +195,62 @@ function SessionTerminal({ sessionId, active }) {
     // events from the app (Claude Code / Codex TUI). This keeps text
     // selection and copy working at all times.
     const MOUSE_MODE_RE = /\x1b\[\?(?:9|1000|1002|1003|1004|1005|1006|1015|1016)h/g;
+    const sanitizeTerminalChunk = chunk => (typeof chunk === "string" ? chunk.replace(MOUSE_MODE_RE, "") : chunk);
 
-    const onData = window.desktopApi.onTerminalData(({ sessionId: targetSessionId, data }) => {
-      if (targetSessionId === sessionId) {
-        terminal.write(typeof data === "string" ? data.replace(MOUSE_MODE_RE, "") : data);
+    let disposed = false;
+    let hydrated = false;
+    let historySeq = 0;
+    const pendingChunks = [];
+
+    const offTerminalData = window.desktopApi.onTerminalData(({ sessionId: targetSessionId, data, seq }) => {
+      if (targetSessionId !== sessionId) {
+        return;
       }
+
+      const normalized = sanitizeTerminalChunk(data);
+      const numericSeq = typeof seq === "number" ? seq : Number(seq) || 0;
+
+      if (!hydrated) {
+        pendingChunks.push({ seq: numericSeq, data: normalized });
+        if (pendingChunks.length > 2000) {
+          pendingChunks.shift();
+        }
+        return;
+      }
+
+      if (numericSeq > 0 && numericSeq <= historySeq) {
+        return;
+      }
+      terminal.write(normalized);
     });
+
+    (async () => {
+      try {
+        const snapshot = await window.desktopApi.getTerminalHistory({ sessionId });
+        if (disposed) {
+          return;
+        }
+        historySeq = typeof snapshot?.seq === "number" ? snapshot.seq : Number(snapshot?.seq) || 0;
+        const history = sanitizeTerminalChunk(snapshot?.data || "");
+        if (history) {
+          terminal.write(history);
+        }
+      } catch {
+        // Ignore history hydration failures.
+      } finally {
+        if (disposed) {
+          return;
+        }
+        hydrated = true;
+        for (const chunk of pendingChunks) {
+          if (chunk.seq > 0 && chunk.seq <= historySeq) {
+            continue;
+          }
+          terminal.write(chunk.data);
+        }
+        pendingChunks.length = 0;
+      }
+    })();
 
     terminal.onData(data => {
       window.desktopApi.sendInput({ sessionId, data });
@@ -290,7 +340,8 @@ function SessionTerminal({ sessionId, active }) {
         pasteTarget.removeEventListener("paste", handlePaste);
       }
 
-      onData();
+      disposed = true;
+      offTerminalData();
       terminalRegistry.delete(sessionId);
       terminal.dispose();
       terminalRef.current = null;
@@ -1341,6 +1392,38 @@ export default function App() {
 
   const activeSession = useMemo(() => sessions.find(session => session.id === activeSessionId), [sessions, activeSessionId]);
 
+  const perform = async (action, payload, onSuccess) => {
+    try {
+      setBusy(true);
+      setError("");
+      await action(payload);
+      if (onSuccess) {
+        onSuccess();
+      }
+    } catch (actionError) {
+      setError(actionError.message || "Action failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeSession = sessionId =>
+    perform(window.desktopApi.removeSession, { sessionId }, () => {
+      if (activeSessionIdRef.current === sessionId) {
+        setActiveSessionId("");
+        setActiveTerminalTabId("");
+      }
+    });
+
+  const closeActiveSession = () => {
+    const nextActiveSession = sessions.find(session => session.id === activeSessionIdRef.current);
+    if (!nextActiveSession) {
+      return false;
+    }
+    closeSession(nextActiveSession.id);
+    return true;
+  };
+
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
@@ -1409,12 +1492,10 @@ export default function App() {
         }
       }
 
-      // Cmd+W — close active tab in terminal session
+      // Cmd+W — close active session
       if (key === "w" && mod && !event.shiftKey) {
-        const activeSession = sessions.find(s => s.id === activeSessionIdRef.current);
-        if (activeSession && activeSession.runtime === "terminal" && activeSession.activeTabId) {
+        if (closeActiveSession()) {
           event.preventDefault();
-          handleCloseTab(activeSession.id, activeSession.activeTabId);
           return;
         }
       }
@@ -1454,6 +1535,14 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [sessions]);
+
+  useEffect(() => {
+    const offCloseActiveSession = window.desktopApi.onCloseActiveSession(() => {
+      closeActiveSession();
+    });
+
+    return offCloseActiveSession;
   }, [sessions]);
 
   useEffect(() => {
@@ -1660,21 +1749,6 @@ export default function App() {
   const handleSaveLinearSettings = async payload => {
     const result = await window.desktopApi.saveLinearSettings(payload);
     setSettings(result);
-  };
-
-  const perform = async (action, payload, onSuccess) => {
-    try {
-      setBusy(true);
-      setError("");
-      await action(payload);
-      if (onSuccess) {
-        onSuccess();
-      }
-    } catch (actionError) {
-      setError(actionError.message || "Action failed.");
-    } finally {
-      setBusy(false);
-    }
   };
 
   const liveSessionCount = sessions.filter(session => ["attached", "running", "starting"].includes(session.status)).length;
@@ -1921,12 +1995,7 @@ export default function App() {
                     <button
                       className="danger"
                       type="button"
-                      onClick={() =>
-                        perform(window.desktopApi.removeSession, { sessionId: activeSession.id }, () => {
-                          setActiveSessionId("");
-                          setActiveTerminalTabId("");
-                        })
-                      }
+                      onClick={() => closeSession(activeSession.id)}
                       disabled={busy}
                     >
                       Close
@@ -1975,11 +2044,7 @@ export default function App() {
                     <button
                       className="danger"
                       type="button"
-                      onClick={() =>
-                        perform(window.desktopApi.removeSession, { sessionId: activeSession.id }, () => {
-                          setActiveSessionId("");
-                        })
-                      }
+                      onClick={() => closeSession(activeSession.id)}
                       disabled={busy}
                     >
                       Remove

@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   getLinearTickets: () => ipcRenderer.invoke("linear:get-tickets"),
   createSessionWithTicket: payload => ipcRenderer.invoke("sessions:create-with-ticket", payload),
   listSessions: () => ipcRenderer.invoke("sessions:list"),
+  getTerminalHistory: payload => ipcRenderer.invoke("sessions:get-terminal-history", payload),
   createSession: payload => ipcRenderer.invoke("sessions:create", payload),
   attachSession: payload => ipcRenderer.invoke("sessions:attach", payload),
   resetSession: payload => ipcRenderer.invoke("sessions:reset", payload),
@@ -50,5 +51,10 @@ contextBridge.exposeInMainWorld("desktopApi", {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on("sessions:changed", listener);
     return () => ipcRenderer.removeListener("sessions:changed", listener);
+  },
+  onCloseActiveSession: handler => {
+    const listener = () => handler();
+    ipcRenderer.on("app:close-active-session", listener);
+    return () => ipcRenderer.removeListener("app:close-active-session", listener);
   },
 });
