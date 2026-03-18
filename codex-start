@@ -151,7 +151,7 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         if docker exec "$CONTAINER_NAME" tmux has-session -t llm-session 2>/dev/null; then
             echo "🔄 Reattaching to existing tmux session..."
             echo ""
-            docker exec -it "$CONTAINER_NAME" tmux -u attach-session -t llm-session
+            docker exec -it "$CONTAINER_NAME" tmux -u attach-session -d -t llm-session
         else
             # No tmux session — run entrypoint to start a fresh one
             docker exec $ENV_OVERRIDE -it "$CONTAINER_NAME" /entrypoint.sh codex

@@ -341,6 +341,7 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
 set -g status off
 set -g mouse on
 set -g default-terminal "xterm-256color"
+set -g aggressive-resize on
 TMUXCONF
 
         # On reset (RESET_TO_MAIN=true), kill the old tmux session so we get a fresh CLI.
@@ -352,7 +353,7 @@ TMUXCONF
         if tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
             echo "🔄 Reattaching to existing session..."
             echo ""
-            exec tmux -u -f "$TMUX_CONF" attach-session -t "$TMUX_SESSION"
+            exec tmux -u -f "$TMUX_CONF" attach-session -d -t "$TMUX_SESSION"
         else
             echo "▶ Starting new session in tmux..."
             echo ""
