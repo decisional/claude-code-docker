@@ -144,7 +144,21 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
 
     echo "  Connecting to existing instance..."
     echo ""
-    docker exec $ENV_OVERRIDE -it "$CONTAINER_NAME" /entrypoint.sh codex
+    if [ "$USE_TMUX" = "true" ]; then
+        # Fast re-attach: if the container already has a tmux session, attach
+        # directly instead of re-running the full entrypoint (which re-checks
+        # credentials, git status, etc. and can get stuck).
+        if docker exec "$CONTAINER_NAME" tmux has-session -t llm-session 2>/dev/null; then
+            echo "🔄 Reattaching to existing tmux session..."
+            echo ""
+            docker exec -it "$CONTAINER_NAME" tmux -u attach-session -t llm-session
+        else
+            # No tmux session — run entrypoint to start a fresh one
+            docker exec $ENV_OVERRIDE -it "$CONTAINER_NAME" /entrypoint.sh codex
+        fi
+    else
+        docker exec $ENV_OVERRIDE -it "$CONTAINER_NAME" /entrypoint.sh codex
+    fi
 else
     # Check if container exists but is stopped
     if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then

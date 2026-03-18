@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -135,16 +135,26 @@ function clipboardPathsFromText(text) {
   return paths.every(Boolean) ? paths : [];
 }
 
-function SessionTerminal({ sessionId, active }) {
+const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
   const containerRef = useRef(null);
   const terminalRef = useRef(null);
   const fitRef = useRef(null);
   const activeRef = useRef(active);
   const resizeTimerRef = useRef(null);
   const lastResizeRef = useRef({ cols: 0, rows: 0 });
+  // When the terminal transitions to active, we suppress resize events briefly
+  // so that layout-shift-induced ResizeObserver callbacks don't send wrong
+  // dimensions to the PTY / tmux.
+  const resizeSuppressedRef = useRef(false);
 
   useEffect(() => {
     activeRef.current = active;
+    if (active) {
+      resizeSuppressedRef.current = true;
+      const id = setTimeout(() => { resizeSuppressedRef.current = false; }, 300);
+      return () => clearTimeout(id);
+    }
+    return undefined;
   }, [active]);
 
   useEffect(() => {
@@ -359,6 +369,12 @@ function SessionTerminal({ sessionId, active }) {
         return;
       }
 
+      // Skip resize during the stabilization window after becoming active to
+      // avoid sending wrong dimensions caused by layout shifts.
+      if (resizeSuppressedRef.current) {
+        return;
+      }
+
       const { clientWidth, clientHeight } = containerRef.current;
       if (clientWidth < 120 || clientHeight < 120) {
         return;
@@ -410,7 +426,9 @@ function SessionTerminal({ sessionId, active }) {
     });
 
     observer.observe(containerRef.current);
-    scheduleResize(40);
+    // Use a delay longer than the 300ms suppression window so the initial fit
+    // happens after layout has stabilized.
+    scheduleResize(350);
 
     return () => {
       observer.disconnect();
@@ -422,7 +440,7 @@ function SessionTerminal({ sessionId, active }) {
   }, [active, sessionId]);
 
   return <div className={`terminal-host ${active ? "active" : "hidden"}`} ref={containerRef} />;
-}
+});
 
 function StatusBadge({ session }) {
   const status = session.status || "unknown";
