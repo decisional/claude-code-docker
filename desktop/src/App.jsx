@@ -1405,6 +1405,7 @@ export default function App() {
   const [showLinearSettings, setShowLinearSettings] = useState(false);
   const [showLinearBrowser, setShowLinearBrowser] = useState(false);
   const [activeTerminalTabId, setActiveTerminalTabId] = useState("");
+  const [contextMenuSessionId, setContextMenuSessionId] = useState(null);
   const activeSessionIdRef = useRef("");
   const sessionSignalTimersRef = useRef({});
 
@@ -1432,6 +1433,13 @@ export default function App() {
         setActiveTerminalTabId("");
       }
     });
+
+  useEffect(() => {
+    if (!contextMenuSessionId) return;
+    const handler = () => setContextMenuSessionId(null);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  }, [contextMenuSessionId]);
 
   const closeActiveSession = () => {
     const nextActiveSession = sessions.find(session => session.id === activeSessionIdRef.current);
@@ -1835,99 +1843,156 @@ export default function App() {
               ) : null}
 
               {sessions.map(session => (
-                <button
-                  className={[
-                    "session-item",
-                    session.id === activeSessionId && "active",
-                    sessionSignals[session.id] === "attention" && "attention",
-                    sessionSignals[session.id] === "running" && "has-output",
-                  ].filter(Boolean).join(" ")}
-                  key={session.id}
-                  title={sessionTitle(session)}
-                  type="button"
-                  onClick={() => selectSession(session.id)}
-                >
-                  <div className="session-item-main">
-                    <div className="session-avatar-wrap">
-                      <SessionAvatar session={session} />
-                      <SessionStateDot status={session.status} />
-                    </div>
+                <div className="session-item-wrap" key={session.id}>
+                  <button
+                    className={[
+                      "session-item",
+                      session.id === activeSessionId && "active",
+                      sessionSignals[session.id] === "attention" && "attention",
+                      sessionSignals[session.id] === "running" && "has-output",
+                    ].filter(Boolean).join(" ")}
+                    title={sessionTitle(session)}
+                    type="button"
+                    onClick={() => selectSession(session.id)}
+                  >
+                    <div className="session-item-main">
+                      <div className="session-avatar-wrap">
+                        <SessionAvatar session={session} />
+                        <SessionStateDot status={session.status} />
+                      </div>
 
-                    {!sidebarCollapsed ? (
-                      <div className="session-copy">
-                        <div className="session-title-line">
-                          <div className="session-title-block">
-                            <div className="session-title-row">
-                              <span className="session-title">{session.threadTitle || session.name}</span>
-                              {session.diffStats && (session.diffStats.totalAdditions > 0 || session.diffStats.totalDeletions > 0) ? (
-                                <span className="session-diff-stats">
-                                  {session.diffStats.totalAdditions > 0 ? <span className="diff-stat-add">+{session.diffStats.totalAdditions}</span> : null}
-                                  {session.diffStats.totalDeletions > 0 ? <span className="diff-stat-del">-{session.diffStats.totalDeletions}</span> : null}
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="session-meta-text">
-                              <span className={`session-runtime runtime-${session.runtime}`}>{runtimeLabel(session.runtime)}</span>
-                              {session.runtime === "terminal" && session.tabs ? (
-                                <span>{session.tabs.length} {session.tabs.length === 1 ? "tab" : "tabs"}</span>
-                              ) : null}
-                              {session.runtime !== "terminal" && (session.currentBranch || session.branch) ? (
-                                <span title="Current git branch">{session.currentBranch || session.branch}</span>
-                              ) : null}
-                              {session.prNumber ? (
-                                <>
-                                  <span
-                                    className="session-pr-link"
-                                    title={`Open PR #${session.prNumber}`}
-                                    onClick={e => {
-                                      e.stopPropagation();
-                                      window.desktopApi.openExternal(session.prUrl);
-                                    }}
-                                  >
-                                    PR #{session.prNumber}
+                      {!sidebarCollapsed ? (
+                        <div className="session-copy">
+                          <div className="session-title-line">
+                            <div className="session-title-block">
+                              <div className="session-title-row">
+                                <span className="session-title">{session.threadTitle || session.name}</span>
+                                {session.diffStats && (session.diffStats.totalAdditions > 0 || session.diffStats.totalDeletions > 0) ? (
+                                  <span className="session-diff-stats">
+                                    {session.diffStats.totalAdditions > 0 ? <span className="diff-stat-add">+{session.diffStats.totalAdditions}</span> : null}
+                                    {session.diffStats.totalDeletions > 0 ? <span className="diff-stat-del">-{session.diffStats.totalDeletions}</span> : null}
                                   </span>
-                                  {session.repoSlug ? (
+                                ) : null}
+                              </div>
+                              <div className="session-meta-text">
+                                <span className={`session-runtime runtime-${session.runtime}`}>{runtimeLabel(session.runtime)}</span>
+                                {session.runtime === "terminal" && session.tabs ? (
+                                  <span>{session.tabs.length} {session.tabs.length === 1 ? "tab" : "tabs"}</span>
+                                ) : null}
+                                {session.runtime !== "terminal" && (session.currentBranch || session.branch) ? (
+                                  <span title="Current git branch">{session.currentBranch || session.branch}</span>
+                                ) : null}
+                                {session.prNumber ? (
+                                  <>
                                     <span
-                                      className="session-pr-link devin-link"
-                                      title="Open in Devin"
+                                      className="session-pr-link"
+                                      title={`Open PR #${session.prNumber}`}
                                       onClick={e => {
                                         e.stopPropagation();
-                                        window.desktopApi.openExternal(`https://app.devin.ai/review/${session.repoSlug}/pull/${session.prNumber}`);
+                                        window.desktopApi.openExternal(session.prUrl);
                                       }}
                                     >
-                                      Devin
+                                      PR #{session.prNumber}
                                     </span>
-                                  ) : null}
-                                </>
-                              ) : null}
-                              {session.port ? <span>port {session.port}</span> : null}
-                              {session.linearTicketId ? (
-                                <span
-                                  className="session-linear-link"
-                                  title={`Open ${session.linearTicketId} in Linear`}
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    if (session.linearTicketUrl) {
-                                      window.desktopApi.openExternal(session.linearTicketUrl);
-                                    }
-                                  }}
-                                >
-                                  {session.linearTicketId}
-                                </span>
-                              ) : null}
+                                    {session.repoSlug ? (
+                                      <span
+                                        className="session-pr-link devin-link"
+                                        title="Open in Devin"
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          window.desktopApi.openExternal(`https://app.devin.ai/review/${session.repoSlug}/pull/${session.prNumber}`);
+                                        }}
+                                      >
+                                        Devin
+                                      </span>
+                                    ) : null}
+                                  </>
+                                ) : null}
+                                {session.port ? <span>port {session.port}</span> : null}
+                                {session.linearTicketId ? (
+                                  <span
+                                    className="session-linear-link"
+                                    title={`Open ${session.linearTicketId} in Linear`}
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      if (session.linearTicketUrl) {
+                                        window.desktopApi.openExternal(session.linearTicketUrl);
+                                      }
+                                    }}
+                                  >
+                                    {session.linearTicketId}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="session-inline-status">
+                              <SessionSignal state={sessionSignals[session.id]} />
                             </div>
                           </div>
 
-                          <div className="session-inline-status">
-                            <SessionSignal state={sessionSignals[session.id]} />
-                          </div>
+                          <div className="session-subtle">{session.runtime === "terminal" ? "Local shell" : (session.dockerStatus || "Waiting for container state")}</div>
                         </div>
+                      ) : null}
+                    </div>
+                  </button>
 
-                        <div className="session-subtle">{session.runtime === "terminal" ? "Local shell" : (session.dockerStatus || "Waiting for container state")}</div>
-                      </div>
-                    ) : null}
-                  </div>
-                </button>
+                  {!sidebarCollapsed ? (
+                    <div className="session-context-menu-wrap">
+                      <button
+                        className="session-dots-btn"
+                        type="button"
+                        title="Session actions"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setContextMenuSessionId(prev => prev === session.id ? null : session.id);
+                        }}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                          <circle cx="8" cy="3" r="1.5" />
+                          <circle cx="8" cy="8" r="1.5" />
+                          <circle cx="8" cy="13" r="1.5" />
+                        </svg>
+                      </button>
+
+                      {contextMenuSessionId === session.id ? (
+                        <div className="session-context-menu" onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setContextMenuSessionId(null);
+                              perform(window.desktopApi.stopSession, { sessionId: session.id });
+                            }}
+                            disabled={busy}
+                          >
+                            Stop
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setContextMenuSessionId(null);
+                              perform(window.desktopApi.resetSession, { sessionId: session.id }, () => focusTerminal(session.id));
+                            }}
+                            disabled={busy}
+                          >
+                            Restart
+                          </button>
+                          <button
+                            type="button"
+                            className="context-menu-danger"
+                            onClick={() => {
+                              setContextMenuSessionId(null);
+                              closeSession(session.id);
+                            }}
+                            disabled={busy}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               ))}
             </div>
           </div>
