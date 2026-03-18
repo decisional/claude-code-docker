@@ -270,7 +270,7 @@ if [ -n "$GIT_REPO_URL" ]; then
             CLONE_ARGS+=(--branch "$CLONE_BRANCH_NAME")
         fi
         if [ -n "$CACHE_REPO" ]; then
-            CLONE_ARGS+=(--reference-if-able "$CACHE_REPO")
+            CLONE_ARGS+=(--reference-if-able "$CACHE_REPO" --dissociate)
         fi
 
         if GIT_TERMINAL_PROMPT=0 git clone "${CLONE_ARGS[@]}" "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
