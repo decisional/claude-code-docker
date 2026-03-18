@@ -51,6 +51,44 @@ install_dependencies() {
     fi
 }
 
+# Build a stable filename for a repository URL so we can keep a shared bare mirror.
+git_cache_key() {
+    local repo_url="$1"
+    echo "$repo_url" | sed 's/[^A-Za-z0-9._-]/_/g'
+}
+
+# Keep a best-effort shared mirror at /git-cache to speed up new container clones.
+prepare_git_cache() {
+    local repo_url="$1"
+    local cache_repo="$2"
+
+    if [ ! -d "/git-cache" ] || [ ! -w "/git-cache" ]; then
+        return 1
+    fi
+
+    mkdir -p /git-cache
+
+    if [ -d "$cache_repo" ]; then
+        if GIT_TERMINAL_PROMPT=0 git --git-dir "$cache_repo" fetch --prune origin \
+            '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*' >/dev/null 2>&1; then
+            echo "⚡ Using shared git cache: $cache_repo"
+            return 0
+        fi
+        echo "⚠ Shared git cache refresh failed (continuing without cache)"
+        return 1
+    fi
+
+    echo "📦 Creating shared git cache..."
+    if GIT_TERMINAL_PROMPT=0 git clone --mirror "$repo_url" "$cache_repo" >/dev/null 2>&1; then
+        echo "⚡ Shared git cache created: $cache_repo"
+        return 0
+    fi
+
+    echo "⚠ Could not create shared git cache (continuing without cache)"
+    rm -rf "$cache_repo" 2>/dev/null || true
+    return 1
+}
+
 
 # Determine which LLM we're using
 LLM_NAME="${LLM_TYPE:-claude}"
@@ -200,15 +238,25 @@ if [ -n "$GIT_REPO_URL" ]; then
 
         echo "Cloning repository to $TARGET_DIR..."
 
+        CACHE_REPO=""
+        CACHE_KEY=$(git_cache_key "$GIT_REPO_URL")
+        CANDIDATE_CACHE_REPO="/git-cache/${CACHE_KEY}.git"
+        if prepare_git_cache "$GIT_REPO_URL" "$CANDIDATE_CACHE_REPO"; then
+            CACHE_REPO="$CANDIDATE_CACHE_REPO"
+        fi
+
         # Determine clone strategy based on whether branch is specified and exists
-        CLONE_BRANCH_ARG=""
+        CLONE_BRANCH_NAME=""
         CREATE_NEW_BRANCH=false
 
         if [ -n "$GIT_BRANCH" ]; then
-            # Check if branch exists remotely using git ls-remote
-            if GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$GIT_REPO_URL" "$GIT_BRANCH" 2>/dev/null | grep -q "refs/heads/$GIT_BRANCH"; then
+            # First try the shared cache; fallback to remote check.
+            if [ -n "$CACHE_REPO" ] && git --git-dir "$CACHE_REPO" show-ref --verify --quiet "refs/heads/$GIT_BRANCH"; then
+                echo "✓ Branch '$GIT_BRANCH' found in shared cache"
+                CLONE_BRANCH_NAME="$GIT_BRANCH"
+            elif GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$GIT_REPO_URL" "$GIT_BRANCH" 2>/dev/null | grep -q "refs/heads/$GIT_BRANCH"; then
                 echo "✓ Branch '$GIT_BRANCH' exists remotely"
-                CLONE_BRANCH_ARG="--branch $GIT_BRANCH"
+                CLONE_BRANCH_NAME="$GIT_BRANCH"
             else
                 echo "ℹ Branch '$GIT_BRANCH' does not exist remotely"
                 echo "  Will create new branch from default branch"
@@ -217,7 +265,15 @@ if [ -n "$GIT_REPO_URL" ]; then
         fi
 
         # Clone the repository
-        if GIT_TERMINAL_PROMPT=0 git clone --depth 1 --config core.fsmonitor=false $CLONE_BRANCH_ARG "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
+        CLONE_ARGS=(--depth 1 --config core.fsmonitor=false)
+        if [ -n "$CLONE_BRANCH_NAME" ]; then
+            CLONE_ARGS+=(--branch "$CLONE_BRANCH_NAME")
+        fi
+        if [ -n "$CACHE_REPO" ]; then
+            CLONE_ARGS+=(--reference-if-able "$CACHE_REPO")
+        fi
+
+        if GIT_TERMINAL_PROMPT=0 git clone "${CLONE_ARGS[@]}" "$GIT_REPO_URL" "$TARGET_DIR" 2>&1; then
             cd "$TARGET_DIR"
 
             # Allow fetching all branches (shallow clone restricts to single branch refspec)
