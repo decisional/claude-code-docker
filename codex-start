@@ -15,6 +15,25 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
+# Keep Codex current whenever codex-start is used.
+update_codex_cli() {
+    local container_name="$1"
+
+    echo "  Updating Codex CLI to latest..."
+    if docker exec -u 0 "$container_name" sh -lc "npm install -g @openai/codex@latest" >/tmp/codex-update.log 2>&1; then
+        local codex_version
+        codex_version=$(docker exec "$container_name" sh -lc "codex --version 2>/dev/null | head -n 1" 2>/dev/null || true)
+        if [ -n "$codex_version" ]; then
+            echo "  ✓ Codex CLI ready: $codex_version"
+        else
+            echo "  ✓ Codex CLI updated"
+        fi
+    else
+        echo "  ⚠ Could not auto-update Codex CLI (continuing with installed version)"
+        sed "s/^/    /" /tmp/codex-update.log | tail -n 20 || true
+    fi
+}
+
 # Parse arguments
 INSTANCE_NAME=""
 GIT_BRANCH_OVERRIDE=""
@@ -87,6 +106,9 @@ fi
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     echo "✓ Container already running"
 
+    echo ""
+    update_codex_cli "$CONTAINER_NAME"
+
     # Copy OpenAI config if it exists locally
     if [ -d "$HOME/.openai" ]; then
         echo "  Copying OpenAI configuration..."
@@ -129,6 +151,9 @@ else
         echo "✓ Container exists but stopped"
         echo "  Starting existing container..."
         docker start "$CONTAINER_NAME"
+
+        echo ""
+        update_codex_cli "$CONTAINER_NAME"
     else
         echo "✓ Creating new container..."
         docker-compose -p "$PROJECT_NAME" run -d --service-ports --name "$CONTAINER_NAME" $ENV_OVERRIDE $VOLUME_OVERRIDE claude-code tail -f /dev/null
@@ -159,6 +184,9 @@ else
         echo ""
         echo "✓ Repository ready"
         echo "  (Dependencies are installing in background)"
+
+        echo ""
+        update_codex_cli "$CONTAINER_NAME"
     fi
 
     echo ""
