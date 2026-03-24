@@ -3,8 +3,9 @@ FROM node:20-slim
 # Accept build arguments for user ID and group ID
 ARG USER_ID=1000
 ARG GROUP_ID=1000
+ARG DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies including Git, zsh, jq, and GitHub CLI
+# Install system dependencies including Git, zsh, jq, GitHub CLI, and headless Chromium deps
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -26,6 +27,37 @@ RUN apt-get update && apt-get install -y \
     libsqlite3-dev \
     libbz2-dev \
     liblzma-dev \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libexpat1 \
+    libfontconfig1 \
+    libgbm1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    libxrender1 \
+    libxshmfence1 \
+    libxss1 \
+    libxtst6 \
+    xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python 3.12 from source
@@ -42,7 +74,8 @@ RUN wget https://www.python.org/ftp/python/3.12.4/Python-3.12.4.tgz && \
 # Create a default virtual environment for pip installs
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir psycopg2-binary requests pre-commit
+ENV PLAYWRIGHT_BROWSERS_PATH="/home/node/.cache/ms-playwright"
+RUN pip install --no-cache-dir browser-use playwright pre-commit psycopg2-binary requests
 
 # Install Poetry for all users
 ENV POETRY_HOME="/opt/poetry"
@@ -78,6 +111,7 @@ USER root
 
 # Install OpenAI Codex CLI globally (always use latest version)
 RUN npm install -g @openai/codex
+RUN npm install -g @decisional/cli
 
 # Modify the existing node user to match host UID/GID
 # Handle case where GID already exists by using existing group or creating new one
@@ -91,8 +125,14 @@ RUN if getent group ${GROUP_ID} > /dev/null 2>&1; then \
     chown -R ${USER_ID}:${GROUP_ID} /home/node
 
 # Create directories and set permissions
-RUN mkdir -p /home/node/.claude /home/node/.codex /workspace /home/node/go/bin && \
-    chown -R node:node /home/node/.claude /home/node/.codex /workspace /home/node/go
+RUN mkdir -p \
+    /home/node/.cache/ms-playwright \
+    /home/node/.claude \
+    /home/node/.codex \
+    /home/node/.config \
+    /workspace \
+    /home/node/go/bin && \
+    chown -R node:node /home/node/.cache /home/node/.claude /home/node/.codex /home/node/.config /workspace /home/node/go
 
 # Copy Claude Code credentials from build context
 # This file is created by build.sh from macOS Keychain
@@ -112,6 +152,10 @@ RUN if [ -f /home/node/.codex/auth.json ]; then \
 
 # Set up working directory
 WORKDIR /workspace
+
+# Install Playwright's Chromium browser into a shared, non-root path
+RUN playwright install chromium && \
+    chown -R node:node /home/node/.cache
 
 # Configure Git and set zsh as default shell for node user
 USER node
@@ -180,6 +224,8 @@ RUN chmod +x /entrypoint.sh
 ENV CLAUDE_SKIP_PERMISSIONS="" \
     LLM_TYPE="claude" \
     HOME=/home/node \
+    XDG_CACHE_HOME=/home/node/.cache \
+    XDG_CONFIG_HOME=/home/node/.config \
     PATH="/home/node/.local/bin:/opt/venv/bin:/home/node/go/bin:/usr/local/go/bin:${PATH}"
 
 # Switch to non-root user (use existing 'node' user)

@@ -96,6 +96,9 @@ else
     fi
 fi
 
+# Ensure browser tooling has writable XDG directories before startup.
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}" "${XDG_CACHE_HOME:-$HOME/.cache}" "$PLAYWRIGHT_BROWSERS_PATH"
+
 # Check GitHub CLI authentication
 echo ""
 if [ -n "$GITHUB_TOKEN" ]; then
