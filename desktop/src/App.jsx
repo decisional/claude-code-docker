@@ -6,10 +6,13 @@ import "@xterm/xterm/css/xterm.css";
 const EMPTY_SESSIONS = [];
 // Registry so parent can focus a terminal by session ID
 const terminalRegistry = new Map();
+const terminalRepaintRegistry = new Map();
 const SIDEBAR_STORAGE_KEY = "autodex-desktop:sidebar-collapsed";
 const REVIEW_PANEL_STORAGE_KEY = "autodex-desktop:review-panel-open";
 const LINEAR_KEY_STORAGE_KEY = "autodex-desktop:linear-configured";
 const SIDEBAR_SHORTCUT_KEY = "b";
+const INITIAL_REPAINT_DELAYS = [360, 560, 820];
+const WINDOW_REPAINT_DELAYS = [60, 220, 480];
 
 const STATUS_LABELS = {
   attached: "Attached",
@@ -30,6 +33,22 @@ function runtimeLabel(runtime) {
 
 function statusLabel(status) {
   return STATUS_LABELS[status] || status || "Unknown";
+}
+
+function repaintTerminal(sessionId, { focus = false } = {}) {
+  const repaint = terminalRepaintRegistry.get(sessionId);
+  if (repaint) {
+    repaint({ focus });
+    return true;
+  }
+
+  const terminal = terminalRegistry.get(sessionId);
+  if (terminal && focus) {
+    terminal.focus();
+    return true;
+  }
+
+  return false;
 }
 
 function normalizeSessionName(value) {
@@ -140,12 +159,17 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
   const terminalRef = useRef(null);
   const fitRef = useRef(null);
   const activeRef = useRef(active);
-  const resizeTimerRef = useRef(null);
+  const resizeTimersRef = useRef(new Set());
   const lastResizeRef = useRef({ cols: 0, rows: 0 });
+  const scheduleResizeRef = useRef(() => {});
   // When the terminal transitions to active, we suppress resize events briefly
   // so that layout-shift-induced ResizeObserver callbacks don't send wrong
   // dimensions to the PTY / tmux.
   const resizeSuppressedRef = useRef(false);
+  const clearResizeTimers = () => {
+    resizeTimersRef.current.forEach(timerId => clearTimeout(timerId));
+    resizeTimersRef.current.clear();
+  };
 
   useEffect(() => {
     activeRef.current = active;
@@ -200,6 +224,9 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     terminalRef.current = terminal;
     fitRef.current = fit;
     terminalRegistry.set(sessionId, terminal);
+    terminalRepaintRegistry.set(sessionId, ({ focus = false } = {}) => {
+      scheduleResizeRef.current({ delays: WINDOW_REPAINT_DELAYS, force: true, focus });
+    });
 
     // Strip mouse-mode enable sequences so xterm.js never captures mouse
     // events from the app (Claude Code / Codex TUI). This keeps text
@@ -341,10 +368,7 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     }
 
     return () => {
-      if (resizeTimerRef.current) {
-        clearTimeout(resizeTimerRef.current);
-        resizeTimerRef.current = null;
-      }
+      clearResizeTimers();
 
       if (pasteTarget) {
         pasteTarget.removeEventListener("paste", handlePaste);
@@ -353,6 +377,7 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
       disposed = true;
       offTerminalData();
       terminalRegistry.delete(sessionId);
+      terminalRepaintRegistry.delete(sessionId);
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = null;
@@ -361,17 +386,19 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
 
   useEffect(() => {
     if (!active) {
+      scheduleResizeRef.current = () => {};
+      clearResizeTimers();
       return undefined;
     }
 
-    const resize = () => {
+    const resize = ({ force = false } = {}) => {
       if (!activeRef.current || !containerRef.current || !fitRef.current || !terminalRef.current) {
         return;
       }
 
       // Skip resize during the stabilization window after becoming active to
       // avoid sending wrong dimensions caused by layout shifts.
-      if (resizeSuppressedRef.current) {
+      if (resizeSuppressedRef.current && !force) {
         return;
       }
 
@@ -392,7 +419,9 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
           return;
         }
 
-        if (lastResizeRef.current.cols === nextSize.cols && lastResizeRef.current.rows === nextSize.rows) {
+        terminalRef.current.refresh(0, Math.max(nextSize.rows - 1, 0));
+
+        if (!force && lastResizeRef.current.cols === nextSize.cols && lastResizeRef.current.rows === nextSize.rows) {
           return;
         }
 
@@ -407,35 +436,52 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
       }
     };
 
-    const scheduleResize = delay => {
-      if (resizeTimerRef.current) {
-        clearTimeout(resizeTimerRef.current);
-      }
+    const scheduleResize = ({ delays = [0], force = false, focus = false } = {}) => {
+      clearResizeTimers();
 
-      resizeTimerRef.current = setTimeout(() => {
-        resizeTimerRef.current = null;
-        resize();
-        if (terminalRef.current) {
-          terminalRef.current.focus();
-        }
-      }, delay);
+      delays.forEach(delay => {
+        const timerId = setTimeout(() => {
+          resizeTimersRef.current.delete(timerId);
+          resize({ force });
+          if (focus && terminalRef.current) {
+            terminalRef.current.focus();
+          }
+        }, delay);
+        resizeTimersRef.current.add(timerId);
+      });
     };
+    scheduleResizeRef.current = scheduleResize;
 
     const observer = new ResizeObserver(() => {
-      scheduleResize(80);
+      scheduleResize({ delays: [80] });
     });
+    const repaintWindow = () => {
+      scheduleResize({ delays: WINDOW_REPAINT_DELAYS, force: true, focus: true });
+    };
+    const repaintVisibleWindow = () => {
+      if (!document.hidden) {
+        repaintWindow();
+      }
+    };
 
     observer.observe(containerRef.current);
-    // Use a delay longer than the 300ms suppression window so the initial fit
-    // happens after layout has stabilized.
-    scheduleResize(350);
+    window.addEventListener("focus", repaintWindow);
+    window.addEventListener("resize", repaintWindow);
+    window.addEventListener("pageshow", repaintWindow);
+    document.addEventListener("visibilitychange", repaintVisibleWindow);
+    // Run several fits after the 300ms suppression window so late layout
+    // stabilization still repaints the terminal without waiting for a manual
+    // window resize.
+    scheduleResize({ delays: INITIAL_REPAINT_DELAYS, force: true, focus: true });
 
     return () => {
       observer.disconnect();
-      if (resizeTimerRef.current) {
-        clearTimeout(resizeTimerRef.current);
-        resizeTimerRef.current = null;
-      }
+      window.removeEventListener("focus", repaintWindow);
+      window.removeEventListener("resize", repaintWindow);
+      window.removeEventListener("pageshow", repaintWindow);
+      document.removeEventListener("visibilitychange", repaintVisibleWindow);
+      scheduleResizeRef.current = () => {};
+      clearResizeTimers();
     };
   }, [active, sessionId]);
 
@@ -805,7 +851,7 @@ function SessionSignal({ state }) {
   return null;
 }
 
-function TerminalTabBar({ session, activeTabId, onSelectTab, onNewTab, onCloseTab }) {
+function TerminalTabBar({ session, activeTabId, onSelectTab, onNewTab, onCloseTab, onRepaint }) {
   const tabs = session.tabs || [];
   return (
     <div className="terminal-tab-bar">
@@ -837,6 +883,13 @@ function TerminalTabBar({ session, activeTabId, onSelectTab, onNewTab, onCloseTa
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
           <path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
         </svg>
+      </button>
+      <div className="terminal-tab-spacer" />
+      <button className="terminal-tab-action" type="button" onClick={onRepaint} title="Repaint terminal">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+          <path d="M13 4.5V2.75a.75.75 0 0 0-1.28-.53l-1.72 1.72A5.5 5.5 0 1 0 13.5 8" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Repaint
       </button>
     </div>
   );
@@ -1662,11 +1715,24 @@ export default function App() {
 
   const focusTerminal = sessionId => {
     setTimeout(() => {
-      const terminal = terminalRegistry.get(sessionId);
-      if (terminal) {
-        terminal.focus();
-      }
+      repaintTerminal(sessionId, { focus: true });
     }, 150);
+  };
+
+  const repaintActiveSession = () => {
+    if (!activeSession) {
+      return;
+    }
+
+    if (activeSession.runtime === "terminal") {
+      const tabId = activeTerminalTabId || activeSession.activeTabId || activeSession.tabs?.[0];
+      if (tabId) {
+        repaintTerminal(`${activeSession.id}:${tabId}`, { focus: true });
+      }
+      return;
+    }
+
+    repaintTerminal(activeSession.id, { focus: true });
   };
 
   const selectSession = async sessionId => {
@@ -2144,6 +2210,7 @@ export default function App() {
                     onSelectTab={tabId => handleSelectTab(activeSession.id, tabId)}
                     onNewTab={() => handleNewTab(activeSession.id)}
                     onCloseTab={tabId => handleCloseTab(activeSession.id, tabId)}
+                    onRepaint={repaintActiveSession}
                   />
                 ) : (
                   <div className="terminal-toolbar">
@@ -2191,6 +2258,12 @@ export default function App() {
                           ) : null}
                         </>
                       ) : null}
+                      <button className="terminal-chip terminal-repaint-button" type="button" onClick={repaintActiveSession} title="Repaint terminal">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                          <path d="M13 4.5V2.75a.75.75 0 0 0-1.28-.53l-1.72 1.72A5.5 5.5 0 1 0 13.5 8" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        Repaint
+                      </button>
                       <button
                         className={`terminal-chip review-toggle ${reviewPanelOpen ? "active" : ""}`}
                         type="button"
