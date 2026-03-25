@@ -1039,6 +1039,35 @@ input:focus {
   color: var(--text);
 }
 
+.terminal-tab-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.terminal-tab-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  transition: background 0.12s, color 0.12s;
+}
+
+.terminal-tab-action:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
 /* Compact header for terminal sessions */
 
 .main-header-compact {
@@ -1306,6 +1335,16 @@ input:focus {
   cursor: pointer;
   gap: 4px;
   font-weight: 500;
+}
+
+.terminal-repaint-button {
+  cursor: pointer;
+  gap: 4px;
+  font-weight: 500;
+}
+
+.terminal-repaint-button svg {
+  flex-shrink: 0;
 }
 
 .review-toggle.active {
