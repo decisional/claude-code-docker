@@ -345,6 +345,16 @@ set -g status off
 set -g mouse on
 set -g default-terminal "xterm-256color"
 set -g aggressive-resize on
+set -g history-limit 100000
+
+# Route mouse-wheel to tmux's copy-mode scrollback instead of forwarding it to
+# the TUI. Claude Code / Codex capture wheel events and route them to the
+# input-box history cycler instead of the conversation viewport (upstream bug
+# anthropics/claude-code#38810, closed as duplicate of the stale #15780). This
+# override makes wheel-up enter copy-mode so users can scroll the conversation
+# regardless of whether the upstream CLIs handle wheel events correctly.
+bind -n WheelUpPane if-shell -F -t = "#{pane_in_mode}" "send-keys -M" "copy-mode -e; send-keys -M"
+bind -n WheelDownPane if-shell -F -t = "#{pane_in_mode}" "send-keys -M"
 TMUXCONF
 
         # On reset (RESET_TO_MAIN=true), kill the old tmux session so we get a fresh CLI.
