@@ -25,6 +25,7 @@ const STATUS_LABELS = {
 };
 
 const SHELL_SAFE_PATH_RE = /^[A-Za-z0-9_./:@%+=,-]+$/;
+const NON_TERMINAL_BLOCKED_PRIVATE_MODES = new Set([9, 47, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 1016, 1047, 1049]);
 
 function runtimeLabel(runtime) {
   if (runtime === "terminal") return "Terminal";
@@ -154,7 +155,15 @@ function clipboardPathsFromText(text) {
   return paths.every(Boolean) ? paths : [];
 }
 
-const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
+function shouldBlockPrivateMode(params, blockedModes) {
+  if (!Array.isArray(params) || params.length === 0) {
+    return false;
+  }
+
+  return params.every(param => typeof param === "number" && blockedModes.has(param));
+}
+
+const SessionTerminal = memo(function SessionTerminal({ sessionId, active, runtime }) {
   const containerRef = useRef(null);
   const terminalRef = useRef(null);
   const fitRef = useRef(null);
@@ -221,18 +230,22 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     terminal.open(containerRef.current);
     fit.fit();
 
+    const parserDisposables = [];
+
+    if (runtime !== "terminal") {
+      for (const final of ["h", "l"]) {
+        parserDisposables.push(
+          terminal.parser.registerCsiHandler({ prefix: "?", final }, params => shouldBlockPrivateMode(params, NON_TERMINAL_BLOCKED_PRIVATE_MODES))
+        );
+      }
+    }
+
     terminalRef.current = terminal;
     fitRef.current = fit;
     terminalRegistry.set(sessionId, terminal);
     terminalRepaintRegistry.set(sessionId, ({ focus = false } = {}) => {
       scheduleResizeRef.current({ delays: WINDOW_REPAINT_DELAYS, force: true, focus });
     });
-
-    // Strip mouse-mode enable sequences so xterm.js never captures mouse
-    // events from the app (Claude Code / Codex TUI). This keeps text
-    // selection and copy working at all times.
-    const MOUSE_MODE_RE = /\x1b\[\?(?:9|1000|1002|1003|1004|1005|1006|1015|1016)h/g;
-    const sanitizeTerminalChunk = chunk => (typeof chunk === "string" ? chunk.replace(MOUSE_MODE_RE, "") : chunk);
 
     let disposed = false;
     let hydrated = false;
@@ -244,7 +257,7 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
         return;
       }
 
-      const normalized = sanitizeTerminalChunk(data);
+      const normalized = data;
       const numericSeq = typeof seq === "number" ? seq : Number(seq) || 0;
 
       if (!hydrated) {
@@ -268,7 +281,7 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
           return;
         }
         historySeq = typeof snapshot?.seq === "number" ? snapshot.seq : Number(snapshot?.seq) || 0;
-        const history = sanitizeTerminalChunk(snapshot?.data || "");
+        const history = snapshot?.data || "";
         if (history) {
           terminal.write(history);
         }
@@ -378,11 +391,12 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
       offTerminalData();
       terminalRegistry.delete(sessionId);
       terminalRepaintRegistry.delete(sessionId);
+      parserDisposables.forEach(disposable => disposable.dispose());
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = null;
     };
-  }, [sessionId]);
+  }, [runtime, sessionId]);
 
   useEffect(() => {
     if (!active) {
@@ -2286,10 +2300,11 @@ export default function App() {
                         key={`${session.id}:${tabId}`}
                         sessionId={`${session.id}:${tabId}`}
                         active={session.id === activeSessionId && tabId === activeTerminalTabId}
+                        runtime={session.runtime}
                       />
                     ));
                   }
-                  return <SessionTerminal key={session.id} sessionId={session.id} active={session.id === activeSessionId} />;
+                  return <SessionTerminal key={session.id} sessionId={session.id} active={session.id === activeSessionId} runtime={session.runtime} />;
                 })}
               </section>
             </>
