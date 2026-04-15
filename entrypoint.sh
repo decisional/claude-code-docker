@@ -338,14 +338,23 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
         # The desktop app opts into tmux so the CLI process survives PTY disconnects.
         TMUX_SESSION="llm-session"
 
-        # Configure tmux: hide status bar so it looks like a normal terminal
+        # Configure tmux for the desktop app: hide the status bar and leave
+        # mouse scrolling to the outer terminal so wheel gestures scroll the
+        # conversation transcript instead of the prompt/history inside tmux.
         export TMUX_CONF="/tmp/.tmux.conf"
         cat > "$TMUX_CONF" <<'TMUXCONF'
 set -g status off
-set -g mouse on
+set -g mouse off
 set -g default-terminal "xterm-256color"
 set -g aggressive-resize on
 TMUXCONF
+
+        apply_tmux_desktop_options() {
+            tmux -f "$TMUX_CONF" set -g status off >/dev/null 2>&1 || true
+            tmux -f "$TMUX_CONF" set -g mouse off >/dev/null 2>&1 || true
+            tmux -f "$TMUX_CONF" set -g default-terminal "xterm-256color" >/dev/null 2>&1 || true
+            tmux -f "$TMUX_CONF" set -g aggressive-resize on >/dev/null 2>&1 || true
+        }
 
         # On reset (RESET_TO_MAIN=true), kill the old tmux session so we get a fresh CLI.
         if [ "$RESET_TO_MAIN" = "true" ] && tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
@@ -354,10 +363,12 @@ TMUXCONF
         fi
 
         if tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
+            apply_tmux_desktop_options
             echo "🔄 Reattaching to existing session..."
             echo ""
             exec tmux -u -f "$TMUX_CONF" attach-session -d -t "$TMUX_SESSION"
         else
+            apply_tmux_desktop_options
             echo "▶ Starting new session in tmux..."
             echo ""
             exec tmux -u -f "$TMUX_CONF" new-session -s "$TMUX_SESSION" "$LLM_CMD $*"
