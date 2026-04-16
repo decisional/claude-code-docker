@@ -25,6 +25,7 @@ services:
       # GitHub authentication token (optional, loaded from .env)
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - CODEX_APPROVAL_POLICY=yolo
+      - CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1
       - LOKI_USER=${LOKI_USER}
       - LOKI_PASSWORD=${LOKI_PASSWORD}
       # Dev server port (passed to container so agents know which port to use)

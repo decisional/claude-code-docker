@@ -1216,6 +1216,49 @@ input:focus {
   line-height: 1.4;
 }
 
+.repo-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.repo-picker-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.repo-picker-options {
+  display: inline-flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.repo-button {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.repo-button:hover {
+  background: var(--hover);
+}
+
+.repo-button.active {
+  border-color: var(--accent);
+  background: rgba(139, 196, 139, 0.08);
+  color: var(--text);
+}
+
 .overlay-preview {
   display: flex;
   align-items: center;
