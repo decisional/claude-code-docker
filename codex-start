@@ -1,7 +1,8 @@
 #!/bin/bash
 # Start a new Codex CLI instance or attach to existing one
-# Usage: ./codex-start [instance-name] [--branch branch-name] [--tmux]
+# Usage: ./codex-start [instance-name] [--branch branch-name] [--tmux] [--repo autodex|openclaw]
 # If no name provided, generates a random name like "happy-tiger"
+# --repo selects which repo to clone into the container (default: autodex from .env).
 
 set -e
 
@@ -14,6 +15,22 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     source "$SCRIPT_DIR/.env"
     set +a
 fi
+
+sync_opendex_key() {
+    local source_key="$HOME/.ssh/openclawcodex.pem"
+    local target_dir="$SCRIPT_DIR/git-data/.ssh"
+    local target_key="$target_dir/openclawcodex.pem"
+
+    if [ ! -f "$source_key" ]; then
+        echo "  (openclawcodex.pem not found; skipping remote OpenClaw key sync)"
+        return 0
+    fi
+
+    mkdir -p "$target_dir"
+    if ! install -m 600 "$source_key" "$target_key" 2>/dev/null; then
+        echo "  (Could not sync openclawcodex.pem, continuing anyway...)"
+    fi
+}
 
 # Keep Codex current whenever codex-start is used.
 update_codex_cli() {
@@ -38,6 +55,7 @@ update_codex_cli() {
 INSTANCE_NAME=""
 GIT_BRANCH_OVERRIDE=""
 USE_TMUX="false"
+REPO_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -49,12 +67,31 @@ while [[ $# -gt 0 ]]; do
             USE_TMUX="true"
             shift
             ;;
+        --repo)
+            REPO_OVERRIDE="$2"
+            shift 2
+            ;;
         *)
             INSTANCE_NAME="$1"
             shift
             ;;
     esac
 done
+
+# Resolve repo key to a concrete git URL. Empty or "autodex" keeps the .env default.
+RESOLVED_REPO_URL=""
+case "$REPO_OVERRIDE" in
+    ""|autodex)
+        REPO_OVERRIDE="autodex"
+        ;;
+    openclaw)
+        RESOLVED_REPO_URL="git@github.com:decisional/openclaw.git"
+        ;;
+    *)
+        echo "⚠ Unknown --repo '$REPO_OVERRIDE' (expected: autodex, openclaw). Falling back to default." >&2
+        REPO_OVERRIDE="autodex"
+        ;;
+esac
 
 # Get instance name from argument or generate a random one
 if [ -z "$INSTANCE_NAME" ]; then
@@ -74,6 +111,7 @@ CONTAINER_NAME="${PROJECT_NAME}-claude-code-1"
 
 echo "🚀 Starting Codex CLI instance: $INSTANCE_NAME"
 echo "   Project: $PROJECT_NAME"
+echo "   Repo: $REPO_OVERRIDE"
 echo ""
 
 # Sync Codex credentials from host to codex-data (mounted into container)
@@ -96,11 +134,20 @@ if [ -n "$GIT_BRANCH_OVERRIDE" ]; then
     echo "📌 Using branch: $GIT_BRANCH_OVERRIDE"
     echo ""
 fi
+if [ -n "$RESOLVED_REPO_URL" ]; then
+    # Override GIT_REPO_URL for this container; clear GIT_CLONE_DIR so entrypoint
+    # falls back to basename(url) for the target directory.
+    ENV_OVERRIDE="$ENV_OVERRIDE -e GIT_REPO_URL=$RESOLVED_REPO_URL -e GIT_CLONE_DIR="
+    echo "📦 Overriding repo: $RESOLVED_REPO_URL"
+    echo ""
+fi
 if [ -n "$HOST_MOUNT_DIR" ] && [ -d "$HOST_MOUNT_DIR" ]; then
     VOLUME_OVERRIDE="-v ${HOST_MOUNT_DIR}:${HOST_MOUNT_DIR}:ro"
     echo "📂 Mounting host directory: $HOST_MOUNT_DIR"
     echo ""
 fi
+
+sync_opendex_key
 
 # Check if container already exists and is running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
@@ -118,13 +165,20 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     # Copy skills from repo if they exist
     if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
         echo "  Copying skills..."
-        docker-compose -p "$PROJECT_NAME" exec -T codex-cli mkdir -p /home/node/.codex/skills
+        docker-compose -p "$PROJECT_NAME" exec -T claude-code mkdir -p /home/node/.codex/skills
         docker cp "$SCRIPT_DIR/.claude/skills/." "${CONTAINER_NAME}:/home/node/.codex/skills/"
     fi
 
-    # Copy project .env file if it exists
+    # Copy commands from repo if they exist
+    if [ -d "$SCRIPT_DIR/.claude/commands" ]; then
+        echo "  Copying commands..."
+        docker-compose -p "$PROJECT_NAME" exec -T claude-code mkdir -p /home/node/.codex/commands
+        docker cp "$SCRIPT_DIR/.claude/commands/." "${CONTAINER_NAME}:/home/node/.codex/commands/"
+    fi
+
+    # Copy project .env file if it exists (autodex repo only).
     ENV_SOURCE="${PROJECT_ENV_FILE:-$SCRIPT_DIR/project.env}"
-    if [ -f "$ENV_SOURCE" ]; then
+    if [ "$REPO_OVERRIDE" = "autodex" ] && [ -f "$ENV_SOURCE" ]; then
         if [ -n "$GIT_CLONE_DIR" ]; then
             REPO_DIR="$GIT_CLONE_DIR"
         elif [ -n "$GIT_REPO_URL" ]; then
@@ -218,9 +272,15 @@ else
         docker cp "$SCRIPT_DIR/.claude/skills/." "${CONTAINER_NAME}:/home/node/.codex/skills/" 2>/dev/null || echo "  (Could not copy skills, continuing anyway...)"
     fi
 
-    # Copy project .env file if it exists
+    # Copy commands from repo if they exist
+    if [ -d "$SCRIPT_DIR/.claude/commands" ]; then
+        echo "  Copying commands..."
+        docker cp "$SCRIPT_DIR/.claude/commands/." "${CONTAINER_NAME}:/home/node/.codex/commands/" 2>/dev/null || echo "  (Could not copy commands, continuing anyway...)"
+    fi
+
+    # Copy project .env file if it exists (autodex repo only).
     ENV_SOURCE="${PROJECT_ENV_FILE:-$SCRIPT_DIR/project.env}"
-    if [ -f "$ENV_SOURCE" ]; then
+    if [ "$REPO_OVERRIDE" = "autodex" ] && [ -f "$ENV_SOURCE" ]; then
         if [ -n "$GIT_CLONE_DIR" ]; then
             REPO_DIR="$GIT_CLONE_DIR"
         elif [ -n "$GIT_REPO_URL" ]; then

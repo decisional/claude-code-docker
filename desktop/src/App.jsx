@@ -944,6 +944,7 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
   const [name, setName] = useState("");
   const [branch, setBranch] = useState("");
   const [port, setPort] = useState("");
+  const [repo, setRepo] = useState("autodex");
   const [showDetails, setShowDetails] = useState(false);
 
   const normalizedName = useMemo(() => normalizeSessionName(name), [name]);
@@ -997,6 +998,7 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
       name: resolvedName,
       branch: runtime === "terminal" ? "" : branch.trim(),
       port: runtime === "claude" ? port.trim() : "",
+      repo: runtime === "terminal" ? "" : repo,
     });
   };
 
@@ -1049,6 +1051,32 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
               <span className="runtime-button-copy">Local shell with your zshrc</span>
             </button>
           </div>
+
+          {runtime !== "terminal" ? (
+            <div className="repo-picker" role="radiogroup" aria-label="Repository">
+              <span className="repo-picker-label">Repo</span>
+              <div className="repo-picker-options">
+                <button
+                  aria-checked={repo === "autodex"}
+                  className={repo === "autodex" ? "repo-button active" : "repo-button"}
+                  role="radio"
+                  type="button"
+                  onClick={() => setRepo("autodex")}
+                >
+                  autodex
+                </button>
+                <button
+                  aria-checked={repo === "openclaw"}
+                  className={repo === "openclaw" ? "repo-button active" : "repo-button"}
+                  role="radio"
+                  type="button"
+                  onClick={() => setRepo("openclaw")}
+                >
+                  openclaw
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="overlay-preview">
             <div className="overlay-preview-row">

@@ -366,7 +366,14 @@ TMUXCONF
         else
             echo "▶ Starting new session in tmux..."
             echo ""
-            exec tmux -u -f "$TMUX_CONF" new-session -s "$TMUX_SESSION" "$LLM_CMD $*"
+            # Start detached so we can send /effort max before attaching
+            tmux -u -f "$TMUX_CONF" new-session -d -s "$TMUX_SESSION" "$LLM_CMD $*"
+            if [ "$LLM_NAME" = "claude" ]; then
+                sleep 3
+                tmux -f "$TMUX_CONF" send-keys -t "$TMUX_SESSION" "/effort max" Enter
+                sleep 1
+            fi
+            exec tmux -u -f "$TMUX_CONF" attach-session -d -t "$TMUX_SESSION"
         fi
     fi
 

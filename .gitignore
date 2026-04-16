@@ -6,7 +6,9 @@ codex-data/
 git-data/
 .claude/*
 !.claude/skills/
+!.claude/commands/
 !.claude/settings.json
+!.claude/refine.json
 workflow-data/
 AGENTS.md
 

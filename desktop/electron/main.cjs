@@ -129,6 +129,14 @@ function buildContainerName(runtime, name) {
   return `${buildProjectName(runtime, name)}-claude-code-1`;
 }
 
+const SUPPORTED_REPOS = new Set(["autodex", "openclaw"]);
+const DEFAULT_REPO = "autodex";
+
+function normalizeRepoKey(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  return SUPPORTED_REPOS.has(raw) ? raw : DEFAULT_REPO;
+}
+
 function dedupeSessions(sessions) {
   const seen = new Set();
   return sessions.filter(session => {
@@ -539,6 +547,7 @@ async function refreshSessionsFromDocker() {
       lastOpenedAt: existing?.lastOpenedAt || existing?.createdAt || new Date().toISOString(),
       branch: existing?.branch || "",
       port: existing?.port || "",
+      repo: existing?.repo || DEFAULT_REPO,
     };
 
     if (existing) {
@@ -649,6 +658,10 @@ async function startInteractiveSession(session, mode = "start", size) {
 
   if (mode === "start" && session.runtime === "claude" && session.port) {
     args.push("--port", String(session.port));
+  }
+
+  if (mode === "start" && session.repo && session.repo !== DEFAULT_REPO) {
+    args.push("--repo", session.repo);
   }
 
   const repoPath = currentRepoPath();
@@ -1139,6 +1152,7 @@ ipcMain.handle("sessions:create", async (_event, payload) => {
   const runtime = payload.runtime === "terminal" ? "terminal" : payload.runtime === "codex" ? "codex" : "claude";
   const branch = String(payload.branch || "").trim();
   const port = String(payload.port || "").trim();
+  const repo = normalizeRepoKey(payload.repo);
 
   if (!name) {
     throw new Error("Session name is required.");
@@ -1170,6 +1184,7 @@ ipcMain.handle("sessions:create", async (_event, payload) => {
     runtime,
     branch,
     port,
+    repo,
     projectName: buildProjectName(runtime, name),
     containerName: buildContainerName(runtime, name),
     status: "starting",
