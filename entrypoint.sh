@@ -370,8 +370,21 @@ TMUXCONF
             tmux -u -f "$TMUX_CONF" new-session -d -s "$TMUX_SESSION" "$LLM_CMD $*"
             if [ "$LLM_NAME" = "claude" ]; then
                 sleep 3
+                # If the CLI crashed during startup the tmux session is already
+                # gone. Fall back to running it in the foreground so the user
+                # sees the real error instead of tmux's "can't find session".
+                if ! tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
+                    echo "⚠ tmux session exited before startup completed; re-running without tmux to surface the error."
+                    exec $LLM_CMD "$@"
+                fi
                 tmux -f "$TMUX_CONF" send-keys -t "$TMUX_SESSION" "/effort max" Enter
                 sleep 1
+            fi
+            # Same guard before attach: if the session died between the
+            # send-keys delay and here, attach would error under set -e.
+            if ! tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
+                echo "⚠ tmux session exited before attach; re-running without tmux to surface the error."
+                exec $LLM_CMD "$@"
             fi
             exec tmux -u -f "$TMUX_CONF" attach-session -d -t "$TMUX_SESSION"
         fi
