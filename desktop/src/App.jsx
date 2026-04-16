@@ -221,6 +221,17 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     terminal.open(containerRef.current);
     fit.fit();
 
+    // Translate wheel into SGR mouse escapes (64=up, 65=down) and send to the
+    // pty so tmux copy-mode scroll works. Returns false to suppress xterm.js's
+    // default alt-screen behavior of converting wheel into arrow-up/down keys
+    // (which cycles Claude/Codex prompt-box history instead of scrolling).
+    terminal.attachCustomWheelEventHandler(e => {
+      if (e.deltaY === 0) return true;
+      const button = e.deltaY < 0 ? 64 : 65;
+      window.desktopApi.sendInput({ sessionId, data: `\x1b[<${button};1;1M` });
+      return false;
+    });
+
     terminalRef.current = terminal;
     fitRef.current = fit;
     terminalRegistry.set(sessionId, terminal);
