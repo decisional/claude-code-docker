@@ -226,6 +226,7 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     // default alt-screen behavior of converting wheel into arrow-up/down keys
     // (which cycles Claude/Codex prompt-box history instead of scrolling).
     terminal.attachCustomWheelEventHandler(e => {
+      if (terminal.buffer.active.type !== "alternate") return true;
       if (e.deltaY === 0) return true;
       const button = e.deltaY < 0 ? 64 : 65;
       window.desktopApi.sendInput({ sessionId, data: `\x1b[<${button};1;1M` });
