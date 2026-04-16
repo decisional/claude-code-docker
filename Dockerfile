@@ -103,6 +103,12 @@ ENV PATH="/usr/local/go/bin:${PATH}" \
     GOPATH="/home/node/go" \
     GOBIN="/home/node/go/bin"
 
+# Skip Cypress binary download on npm install. Cypress is a dev-only e2e tool
+# not used inside the container, and its linux-arm64 install fails when
+# unzipping into the cache dir (ENOENT on intermediate dirs), breaking any
+# npm install of a repo that pulls Cypress as a dev dep.
+ENV CYPRESS_INSTALL_BINARY=0
+
 # Install Claude Code CLI using native installer
 # The installer downloads to ~/.claude/downloads and installs to ~/.local/bin/claude
 USER node
