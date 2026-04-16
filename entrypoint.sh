@@ -345,6 +345,12 @@ set -g status off
 set -g mouse on
 set -g default-terminal "xterm-256color"
 set -g aggressive-resize on
+
+# Scroll 1 line per wheel event instead of the default 5 so that the
+# desktop app's throttled wheel handler produces smooth, continuous
+# scrolling rather than jerky 5-line jumps.
+bind -n WheelUpPane if-shell -F -t = "#{pane_in_mode}" "send-keys -X scroll-up" "copy-mode -e; send-keys -X scroll-up"
+bind -n WheelDownPane if-shell -F -t = "#{pane_in_mode}" "send-keys -X scroll-down"
 TMUXCONF
 
         # On reset (RESET_TO_MAIN=true), kill the old tmux session so we get a fresh CLI.
