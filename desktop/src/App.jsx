@@ -230,7 +230,7 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
       if (terminal.buffer.active.type !== "alternate") return true;
       if (e.deltaY === 0) return true;
       const now = Date.now();
-      if (now - lastWheelTime < 50) return false;
+      if (now - lastWheelTime < 30) return false;
       lastWheelTime = now;
       const button = e.deltaY < 0 ? 64 : 65;
       window.desktopApi.sendInput({ sessionId, data: `\x1b[<${button};1;1M` });
