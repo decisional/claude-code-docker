@@ -422,7 +422,7 @@ input:focus {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 220px;
+  width: 320px;
   max-width: 360px;
   padding: 8px 10px;
   background: #1f211f;
@@ -432,7 +432,6 @@ input:focus {
   color: var(--text);
   font-size: 11px;
   line-height: 1.45;
-  transform: translateX(-50%);
   pointer-events: auto;
 }
 

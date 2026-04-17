@@ -558,7 +558,14 @@ function PrStatusIndicator({ session }) {
   const show = () => {
     if (!dotRef.current) return;
     const rect = dotRef.current.getBoundingClientRect();
-    setAnchor({ left: rect.left + rect.width / 2, top: rect.bottom + 6 });
+    const tooltipWidth = 320;
+    const margin = 8;
+    let left = rect.left;
+    if (left + tooltipWidth + margin > window.innerWidth) {
+      left = window.innerWidth - tooltipWidth - margin;
+    }
+    if (left < margin) left = margin;
+    setAnchor({ left, top: rect.bottom + 6 });
   };
   const hide = () => setAnchor(null);
 
