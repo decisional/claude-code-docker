@@ -2127,6 +2127,9 @@ export default function App() {
                                 {session.runtime === "terminal" && session.tabs ? (
                                   <span>{session.tabs.length} {session.tabs.length === 1 ? "tab" : "tabs"}</span>
                                 ) : null}
+                                {session.runtime !== "terminal" && session.repo ? (
+                                  <span className="session-repo" title="Repository">{session.repo}</span>
+                                ) : null}
                                 {session.runtime !== "terminal" && (session.currentBranch || session.branch) ? (
                                   <span title="Current git branch">{session.currentBranch || session.branch}</span>
                                 ) : null}
