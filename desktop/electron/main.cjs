@@ -11,8 +11,12 @@ const MAX_TERMINAL_HISTORY_BYTES = 8 * 1024 * 1024;
 const liveSessions = new Map();
 const notificationCooldowns = new Map();
 const terminalHistory = new Map();
-// Cache PR lookups per session: sessionId -> { branch, prNumber, prUrl }
+// Cache PR lookups per session: sessionId -> { branch, prNumber, prUrl, state, isDraft, mergedAt, checks, checksStatus, fetchedAt }
 const prCache = new Map();
+// Minimum delay between full PR+checks refreshes for a session whose branch
+// hasn't changed. Session refresh loop fires every 5s; we don't need to hammer
+// `gh` that often for status that typically changes over tens of seconds.
+const PR_STATUS_TTL_MS = 30_000;
 // Set of session IDs currently being removed — resize events are suppressed for
 // all *other* sessions while a removal is in progress to avoid layout-shift
 // triggered resizes that cause tmux reflow / scrollback loss.
@@ -484,6 +488,68 @@ async function getContainerDiff(containerName, filePath) {
   }
 }
 
+function normalizeCheck(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  if (raw.__typename === "StatusContext") {
+    const state = (raw.state || "").toUpperCase();
+    let status;
+    if (state === "SUCCESS") status = "success";
+    else if (state === "FAILURE" || state === "ERROR") status = "failure";
+    else if (state === "PENDING" || state === "EXPECTED") status = "pending";
+    else status = "neutral";
+    return {
+      name: raw.context || "status",
+      workflow: "",
+      status,
+      conclusion: state.toLowerCase() || null,
+      url: raw.targetUrl || "",
+    };
+  }
+  // Default path covers CheckRun (GitHub Actions etc.)
+  const runStatus = (raw.status || "").toUpperCase();
+  const conclusion = (raw.conclusion || "").toUpperCase();
+  let status;
+  if (runStatus !== "COMPLETED") {
+    status = "pending";
+  } else if (conclusion === "SUCCESS") {
+    status = "success";
+  } else if (conclusion === "NEUTRAL" || conclusion === "SKIPPED") {
+    status = "neutral";
+  } else if (
+    conclusion === "FAILURE" ||
+    conclusion === "TIMED_OUT" ||
+    conclusion === "CANCELLED" ||
+    conclusion === "ACTION_REQUIRED" ||
+    conclusion === "STALE" ||
+    conclusion === "STARTUP_FAILURE"
+  ) {
+    status = "failure";
+  } else {
+    status = "neutral";
+  }
+  return {
+    name: raw.name || "check",
+    workflow: raw.workflowName || "",
+    status,
+    conclusion: conclusion ? conclusion.toLowerCase() : null,
+    url: raw.detailsUrl || "",
+  };
+}
+
+function rollupChecksStatus(checks) {
+  if (!checks || checks.length === 0) return "none";
+  let sawPending = false;
+  let sawSuccess = false;
+  for (const c of checks) {
+    if (c.status === "failure") return "failure";
+    if (c.status === "pending") sawPending = true;
+    if (c.status === "success") sawSuccess = true;
+  }
+  if (sawPending) return "pending";
+  if (sawSuccess) return "success";
+  return "neutral";
+}
+
 async function getPrForBranch(repoSlug, branch) {
   if (!repoSlug || !branch || branch === "main" || branch === "master") {
     return null;
@@ -496,8 +562,10 @@ async function getPrForBranch(repoSlug, branch) {
       repoSlug,
       "--head",
       branch,
+      "--state",
+      "all",
       "--json",
-      "number,url",
+      "number,url,state,isDraft,mergedAt,statusCheckRollup",
       "--jq",
       ".[0]",
     ]);
@@ -505,7 +573,19 @@ async function getPrForBranch(repoSlug, branch) {
     if (!trimmed) {
       return null;
     }
-    return JSON.parse(trimmed);
+    const raw = JSON.parse(trimmed);
+    const checks = Array.isArray(raw.statusCheckRollup)
+      ? raw.statusCheckRollup.map(normalizeCheck).filter(Boolean)
+      : [];
+    return {
+      number: raw.number,
+      url: raw.url,
+      state: raw.state || "OPEN",
+      isDraft: Boolean(raw.isDraft),
+      mergedAt: raw.mergedAt || null,
+      checks,
+      checksStatus: rollupChecksStatus(checks),
+    };
   } catch {
     return null;
   }
@@ -564,17 +644,43 @@ async function refreshSessionsFromDocker() {
       session.currentBranch = branch;
       session.repoSlug = repoSlug || "";
 
-      // Only query GitHub for PR when the branch changes or we haven't found a PR yet
+      // Query GitHub for PR + checks when: branch changed, we haven't found a PR yet,
+      // the PR is still open (checks can change), or cached status is older than TTL.
       const cached = prCache.get(session.id);
-      if (cached && cached.branch === branch && cached.prNumber) {
-        session.prNumber = cached.prNumber;
-        session.prUrl = cached.prUrl;
+      const now = Date.now();
+      const isOpenOrUnknown = !cached || cached.state === "OPEN";
+      const stale = !cached || !cached.fetchedAt || now - cached.fetchedAt > PR_STATUS_TTL_MS;
+      const branchChanged = !cached || cached.branch !== branch;
+      const canReuse = cached && !branchChanged && cached.prNumber && (!isOpenOrUnknown || !stale);
+
+      let pr;
+      if (canReuse) {
+        pr = cached;
       } else {
-        const pr = await getPrForBranch(repoSlug, branch);
-        session.prNumber = pr ? pr.number : null;
-        session.prUrl = pr ? pr.url : null;
-        prCache.set(session.id, { branch, prNumber: session.prNumber, prUrl: session.prUrl });
+        const fetched = await getPrForBranch(repoSlug, branch);
+        pr = fetched
+          ? {
+              branch,
+              prNumber: fetched.number,
+              prUrl: fetched.url,
+              state: fetched.state,
+              isDraft: fetched.isDraft,
+              mergedAt: fetched.mergedAt,
+              checks: fetched.checks,
+              checksStatus: fetched.checksStatus,
+              fetchedAt: now,
+            }
+          : { branch, prNumber: null, prUrl: null, state: null, isDraft: false, mergedAt: null, checks: [], checksStatus: "none", fetchedAt: now };
+        prCache.set(session.id, pr);
       }
+
+      session.prNumber = pr.prNumber || null;
+      session.prUrl = pr.prUrl || null;
+      session.prState = pr.state || null;
+      session.prIsDraft = Boolean(pr.isDraft);
+      session.prMergedAt = pr.mergedAt || null;
+      session.prChecks = pr.checks || [];
+      session.prChecksStatus = pr.checksStatus || "none";
 
       // Also fetch diff stats for sidebar +/- counts
       const diffStats = await getContainerDiffStats(session.containerName);

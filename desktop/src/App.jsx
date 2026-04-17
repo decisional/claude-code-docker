@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -511,6 +512,136 @@ function StatusBadge({ session }) {
 
 function SessionStateDot({ status }) {
   return <span className={`session-state-dot status-${status || "unknown"}`} title={statusLabel(status)} />;
+}
+
+const CHECK_STATUS_LABEL = {
+  success: "passed",
+  failure: "failed",
+  pending: "running",
+  neutral: "neutral",
+};
+
+function PrStatusIndicator({ session }) {
+  const dotRef = useRef(null);
+  const [anchor, setAnchor] = useState(null);
+
+  const isMerged = session.prState === "MERGED" || Boolean(session.prMergedAt);
+  const isClosed = session.prState === "CLOSED" && !isMerged;
+  const isDraft = Boolean(session.prIsDraft) && !isMerged && !isClosed;
+  const checks = Array.isArray(session.prChecks) ? session.prChecks : [];
+
+  let variant;
+  let label;
+  if (isMerged) {
+    variant = "merged";
+    label = "Merged";
+  } else if (isClosed) {
+    variant = "closed";
+    label = "Closed";
+  } else if (checks.length === 0) {
+    variant = isDraft ? "draft" : "none";
+    label = isDraft ? "Draft — no checks" : "No checks";
+  } else {
+    variant = session.prChecksStatus || "none";
+    const counts = checks.reduce((acc, c) => {
+      acc[c.status] = (acc[c.status] || 0) + 1;
+      return acc;
+    }, {});
+    const parts = [];
+    if (counts.failure) parts.push(`${counts.failure} failing`);
+    if (counts.pending) parts.push(`${counts.pending} running`);
+    if (counts.success) parts.push(`${counts.success} passed`);
+    if (counts.neutral) parts.push(`${counts.neutral} neutral`);
+    label = parts.join(" · ") || "Checks";
+  }
+
+  const show = () => {
+    if (!dotRef.current) return;
+    const rect = dotRef.current.getBoundingClientRect();
+    setAnchor({ left: rect.left + rect.width / 2, top: rect.bottom + 6 });
+  };
+  const hide = () => setAnchor(null);
+
+  const openCheck = (e, url) => {
+    e.stopPropagation();
+    if (url) {
+      window.desktopApi.openExternal(url);
+    }
+  };
+
+  return (
+    <span className="pr-status-wrap">
+      <span
+        ref={dotRef}
+        className={`pr-status-dot pr-status-${variant}`}
+        aria-label={label}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        tabIndex={0}
+      />
+      {anchor
+        ? createPortal(
+            <span
+              className="pr-status-tooltip"
+              role="tooltip"
+              style={{ left: `${anchor.left}px`, top: `${anchor.top}px` }}
+              onMouseEnter={show}
+              onMouseLeave={hide}
+            >
+              <span className="pr-status-tooltip-header">
+                <span className={`pr-status-dot pr-status-${variant}`} />
+                <span>{label}</span>
+              </span>
+              {isMerged ? (
+                <span className="pr-status-tooltip-empty">Merged{session.prMergedAt ? ` ${formatRelativeTime(session.prMergedAt)}` : ""}</span>
+              ) : null}
+              {!isMerged && checks.length === 0 ? (
+                <span className="pr-status-tooltip-empty">{isDraft ? "Draft PR — no checks yet" : "No checks reported"}</span>
+              ) : null}
+              {!isMerged && checks.length > 0 ? (
+                <span className="pr-status-tooltip-list">
+                  {checks.map((c, i) => (
+                    <span
+                      key={`${c.workflow || ""}:${c.name}:${i}`}
+                      className={`pr-check-row pr-check-${c.status} ${c.url ? "clickable" : ""}`}
+                      onClick={c.url ? e => openCheck(e, c.url) : undefined}
+                      title={c.url || ""}
+                    >
+                      <span className={`pr-check-icon pr-status-${c.status}`} />
+                      <span className="pr-check-name">
+                        {c.workflow ? <span className="pr-check-workflow">{c.workflow} · </span> : null}
+                        {c.name}
+                      </span>
+                      <span className="pr-check-conclusion">{c.conclusion || CHECK_STATUS_LABEL[c.status] || ""}</span>
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+            </span>,
+            document.body
+          )
+        : null}
+    </span>
+  );
+}
+
+function formatRelativeTime(iso) {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const diffMs = Date.now() - then;
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.round(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.round(months / 12)}y ago`;
 }
 
 function CopyPromptButton({ prompt }) {
@@ -2004,6 +2135,7 @@ export default function App() {
                                     >
                                       PR #{session.prNumber}
                                     </span>
+                                    <PrStatusIndicator session={session} />
                                     {session.repoSlug ? (
                                       <span
                                         className="session-pr-link devin-link"
