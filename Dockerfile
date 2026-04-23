@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:22.14.0-slim
 
 # Accept build arguments for user ID and group ID
 ARG USER_ID=1000
@@ -204,9 +204,9 @@ RUN if [ -n "${GIT_REPO_URL}" ]; then \
     fi && \
     rm -rf /tmp/.build-ssh
 
-# Build-time npm install for faster startup (optional)
-# If NPM_INSTALL_DIR is set, run npm install in that directory within the pre-cloned repo
-# so that node_modules are baked into the image and don't need to be installed at runtime
+# Build-time JS dependency install for faster startup (optional)
+# If NPM_INSTALL_DIR is set, run the repo's package manager in that directory
+# within the pre-cloned repo so dependencies are baked into the image.
 ARG NPM_INSTALL_DIR=""
 RUN if [ -n "${NPM_INSTALL_DIR}" ] && [ -n "${GIT_REPO_URL}" ]; then \
         if [ -n "${GIT_CLONE_DIR}" ]; then \
@@ -215,11 +215,22 @@ RUN if [ -n "${NPM_INSTALL_DIR}" ] && [ -n "${GIT_REPO_URL}" ]; then \
             INSTALL_PATH="/workspace/$(basename ${GIT_REPO_URL} .git)/${NPM_INSTALL_DIR}"; \
         fi && \
         if [ -d "${INSTALL_PATH}" ] && [ -f "${INSTALL_PATH}/package.json" ]; then \
-            echo "Installing npm dependencies in ${INSTALL_PATH}..." && \
-            su -s /bin/bash node -c "cd '${INSTALL_PATH}' && npm install" && \
-            echo "npm dependencies installed successfully in ${NPM_INSTALL_DIR}"; \
+            echo "Installing JS dependencies in ${INSTALL_PATH}..." && \
+            if [ -f "${INSTALL_PATH}/pnpm-lock.yaml" ] || [ -f "${INSTALL_PATH}/pnpm-workspace.yaml" ]; then \
+                su -s /bin/bash node -c "cd '${INSTALL_PATH}' && if [ -f pnpm-lock.yaml ]; then corepack pnpm install --frozen-lockfile; else corepack pnpm install; fi" && \
+                echo "pnpm dependencies installed successfully in ${NPM_INSTALL_DIR}"; \
+            elif [ -f "${INSTALL_PATH}/yarn.lock" ]; then \
+                su -s /bin/bash node -c "cd '${INSTALL_PATH}' && corepack yarn install --immutable" && \
+                echo "yarn dependencies installed successfully in ${NPM_INSTALL_DIR}"; \
+            elif [ -f "${INSTALL_PATH}/package-lock.json" ] || [ -f "${INSTALL_PATH}/npm-shrinkwrap.json" ]; then \
+                su -s /bin/bash node -c "cd '${INSTALL_PATH}' && npm ci" && \
+                echo "npm dependencies installed successfully in ${NPM_INSTALL_DIR}"; \
+            else \
+                su -s /bin/bash node -c "cd '${INSTALL_PATH}' && npm install" && \
+                echo "npm dependencies installed successfully in ${NPM_INSTALL_DIR}"; \
+            fi; \
         else \
-            echo "Warning: ${INSTALL_PATH} does not exist or has no package.json (skipping npm install)"; \
+            echo "Warning: ${INSTALL_PATH} does not exist or has no package.json (skipping JS dependency install)"; \
         fi; \
     fi
 

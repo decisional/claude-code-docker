@@ -5,12 +5,105 @@
 
 set -e
 
+detect_node_package_manager() {
+    local dir="$1"
+    local package_manager=""
+
+    if [ ! -f "$dir/package.json" ]; then
+        return 1
+    fi
+
+    if [ -f "$dir/pnpm-lock.yaml" ] || [ -f "$dir/pnpm-workspace.yaml" ]; then
+        echo "pnpm"
+        return 0
+    fi
+
+    if [ -f "$dir/yarn.lock" ]; then
+        echo "yarn"
+        return 0
+    fi
+
+    if [ -f "$dir/package-lock.json" ] || [ -f "$dir/npm-shrinkwrap.json" ]; then
+        echo "npm"
+        return 0
+    fi
+
+    package_manager=$(
+        cd "$dir" && \
+        node -e 'try { const pkg = require("./package.json"); process.stdout.write(String(pkg.packageManager || "").split("@")[0]); } catch {}' 2>/dev/null || true
+    )
+
+    case "$package_manager" in
+        pnpm|yarn|npm)
+            echo "$package_manager"
+            ;;
+        *)
+            echo "npm"
+            ;;
+    esac
+}
+
+install_node_dependencies() {
+    local dir="$1"
+    local package_manager="$2"
+
+    echo ""
+    echo "📦 Found package.json - installing Node.js dependencies with $package_manager in background..."
+
+    case "$package_manager" in
+        pnpm)
+            (
+                (
+                    cd "$dir" && \
+                    if [ -f pnpm-lock.yaml ]; then
+                        corepack pnpm install --frozen-lockfile
+                    else
+                        corepack pnpm install
+                    fi
+                ) 2>&1 && echo "✓ Node.js dependencies installed via pnpm" || echo "⚠ pnpm install had warnings (continuing anyway)"
+            ) &
+            ;;
+        yarn)
+            (
+                (
+                    cd "$dir" && \
+                    if [ -f yarn.lock ]; then
+                        corepack yarn install --immutable
+                    else
+                        corepack yarn install
+                    fi
+                ) 2>&1 && echo "✓ Node.js dependencies installed via yarn" || echo "⚠ yarn install had warnings (continuing anyway)"
+            ) &
+            ;;
+        *)
+            (
+                (
+                    cd "$dir" && \
+                    if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+                        npm ci
+                    else
+                        npm install
+                    fi
+                ) 2>&1 && echo "✓ Node.js dependencies installed via npm" || echo "⚠ npm install had warnings (continuing anyway)"
+            ) &
+            ;;
+    esac
+}
+
+is_poetry_project() {
+    local dir="$1"
+
+    [ -f "$dir/pyproject.toml" ] || return 1
+    [ -f "$dir/poetry.lock" ] && return 0
+    grep -Eq '^\[tool\.poetry(\.|])' "$dir/pyproject.toml"
+}
+
 # Function to install project dependencies (called after clone or pre-clone pull)
 install_dependencies() {
     local dir="$1"
 
-    # Auto-install Python dependencies if pyproject.toml exists (in background)
-    if [ -f "$dir/pyproject.toml" ]; then
+    # Auto-install Python dependencies for Poetry-managed projects (in background)
+    if is_poetry_project "$dir"; then
         echo ""
         echo "📦 Found pyproject.toml - installing Python dependencies in background..."
         (cd "$dir" && poetry install --no-interaction 2>&1 && echo "✓ Python dependencies installed via Poetry" || echo "⚠ Poetry install had warnings (continuing anyway)") &
@@ -39,15 +132,9 @@ install_dependencies() {
 
     # Auto-install Node.js dependencies if package.json exists
     if [ -f "$dir/package.json" ]; then
-        echo ""
-        echo "📦 Found package.json - installing Node.js dependencies..."
-
-        # Install pg package immediately for PostgreSQL support (foreground)
-        echo "Installing pg package..."
-        (cd "$dir" && npm install pg --no-save 2>&1 && echo "✓ pg package ready" || echo "⚠ pg package installation failed")
-
-        # Install other Node.js dependencies in background
-        (cd "$dir" && npm install 2>&1 && echo "✓ Node.js dependencies installed") &
+        local package_manager
+        package_manager=$(detect_node_package_manager "$dir")
+        install_node_dependencies "$dir" "$package_manager"
     fi
 }
 
