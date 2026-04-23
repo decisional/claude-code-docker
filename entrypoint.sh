@@ -390,6 +390,12 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
         # Launch OpenAI Codex CLI
         LLM_CMD="codex"
 
+        # Codex inside the desktop app is already wrapped by tmux. Inline mode
+        # preserves scrollback and avoids trapping the live composer off-screen.
+        if [ "${CODEX_NO_ALT_SCREEN:-true}" != "false" ]; then
+            LLM_CMD="$LLM_CMD --no-alt-screen"
+        fi
+
         # Add --yolo flag if enabled (full bypass mode)
         # This disables all approval prompts and sandboxing
         if [ "$CODEX_YOLO" = "true" ]; then
@@ -425,7 +431,7 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
         # The desktop app opts into tmux so the CLI process survives PTY disconnects.
         TMUX_SESSION="llm-session"
 
-        # Configure tmux: hide status bar so it looks like a normal terminal
+        # Configure tmux: hide status bar so it looks like a normal terminal.
         export TMUX_CONF="/tmp/.tmux.conf"
         cat > "$TMUX_CONF" <<'TMUXCONF'
 set -g status off

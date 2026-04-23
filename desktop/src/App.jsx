@@ -14,6 +14,8 @@ const LINEAR_KEY_STORAGE_KEY = "autodex-desktop:linear-configured";
 const SIDEBAR_SHORTCUT_KEY = "b";
 const INITIAL_REPAINT_DELAYS = [360, 560, 820];
 const WINDOW_REPAINT_DELAYS = [60, 220, 480];
+const VIEWPORT_PAGE_KEYS = new Set(["PageUp", "PageDown"]);
+const VIEWPORT_LINE_KEYS = new Set(["ArrowUp", "ArrowDown"]);
 
 const STATUS_LABELS = {
   attached: "Attached",
@@ -171,6 +173,26 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     resizeTimersRef.current.forEach(timerId => clearTimeout(timerId));
     resizeTimersRef.current.clear();
   };
+  const focusTerminalInput = () => {
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    terminal.focus();
+
+    if (terminal.textarea && document.activeElement !== terminal.textarea) {
+      try {
+        terminal.textarea.focus({ preventScroll: true });
+      } catch {
+        terminal.textarea.focus();
+      }
+    }
+  };
+  const keepTerminalInputFocused = () => {
+    focusTerminalInput();
+    requestAnimationFrame(focusTerminalInput);
+  };
 
   useEffect(() => {
     activeRef.current = active;
@@ -215,6 +237,7 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
         brightMagenta: "#d8b4fe",
       },
       scrollback: 200000,
+      scrollOnUserInput: true,
       allowTransparency: false,
     });
     const fit = new FitAddon();
@@ -226,17 +249,36 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     // pty so tmux copy-mode scroll works. Returns false to suppress xterm.js's
     // default alt-screen behavior of converting wheel into arrow-up/down keys
     // (which cycles Claude/Codex prompt-box history instead of scrolling).
+    //
+    // scrollUpDepth approximates how many net wheel-up steps we've sent tmux
+    // without a matching wheel-down. While > 0 we assume tmux is parked in
+    // copy-mode; the onData handler below uses this to auto-cancel copy-mode
+    // when the user types, so the keystroke reaches the live input prompt.
     let lastWheelTime = 0;
+    let scrollUpDepth = 0;
     terminal.attachCustomWheelEventHandler(e => {
+      keepTerminalInputFocused();
       if (terminal.buffer.active.type !== "alternate") return true;
       if (e.deltaY === 0) return true;
       const now = Date.now();
       if (now - lastWheelTime < 30) return false;
       lastWheelTime = now;
-      const button = e.deltaY < 0 ? 64 : 65;
-      window.desktopApi.sendInput({ sessionId, data: `\x1b[<${button};1;1M` });
+      if (e.deltaY < 0) {
+        scrollUpDepth += 1;
+        window.desktopApi.sendInput({ sessionId, data: "\x1b[<64;1;1M" });
+      } else {
+        scrollUpDepth = Math.max(0, scrollUpDepth - 1);
+        window.desktopApi.sendInput({ sessionId, data: "\x1b[<65;1;1M" });
+      }
       return false;
     });
+
+    // Nav keys that tmux copy-mode uses for scrollback navigation — passing
+    // them through lets keyboard-scroll users keep navigating. Everything
+    // else (letters, Enter, Tab, Backspace, Ctrl-combos) is treated as
+    // "the user wants to type into the live prompt", so we cancel copy-mode
+    // with a "q" first and then deliver the real keystroke.
+    const COPY_MODE_NAV_RE = /^\x1b(?:\[(?:[ABCDHF]|5~|6~)|O[ABCDHF])?$/;
 
     terminalRef.current = terminal;
     fitRef.current = fit;
@@ -306,9 +348,25 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
       }
     })();
 
-    terminal.onData(data => {
+    // Deliver a keystroke to Claude/Codex, first snapping tmux out of
+    // copy-mode if we've been scrolled up. `data` of a pure nav escape
+    // (arrows, pgup/pgdn, bare Esc) is left as-is so keyboard scrollback
+    // navigation in copy-mode still works.
+    const sendPromptKey = data => {
+      if (scrollUpDepth > 0) {
+        if (data === "\x1b") {
+          scrollUpDepth = 0;
+        } else if (!COPY_MODE_NAV_RE.test(data)) {
+          window.desktopApi.sendInput({ sessionId, data: "q" });
+          scrollUpDepth = 0;
+        }
+      }
+      terminal.scrollToBottom();
+      keepTerminalInputFocused();
       window.desktopApi.sendInput({ sessionId, data });
-    });
+    };
+
+    terminal.onData(sendPromptKey);
 
     // Cmd+C copies selection when text is selected, otherwise sends SIGINT
     terminal.attachCustomKeyEventHandler(event => {
@@ -320,9 +378,26 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
           return false; // Prevent sending Ctrl+C to the terminal
         }
       }
+
+      const isKeyDown = event.type === "keydown";
+      const isPlainViewportKey = isKeyDown && !event.metaKey && !event.ctrlKey && !event.altKey;
+      const isAlternateBuffer = terminal.buffer.active.type === "alternate";
+
+      if (!isAlternateBuffer && isPlainViewportKey && VIEWPORT_PAGE_KEYS.has(event.key)) {
+        terminal.scrollPages(event.key === "PageUp" ? -1 : 1);
+        keepTerminalInputFocused();
+        return false;
+      }
+
+      if (!isAlternateBuffer && isPlainViewportKey && event.shiftKey && VIEWPORT_LINE_KEYS.has(event.key)) {
+        terminal.scrollLines(event.key === "ArrowUp" ? -1 : 1);
+        keepTerminalInputFocused();
+        return false;
+      }
+
       // Cmd+Backspace clears the entire line (like Warp terminal)
       if (event.metaKey && event.key === "Backspace" && event.type === "keydown") {
-        window.desktopApi.sendInput({ sessionId, data: "\x15" });
+        sendPromptKey("\x15");
         return false;
       }
       // Shift+Enter inserts a newline instead of submitting.
@@ -330,7 +405,7 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
       // Claude Code and Codex interpret as Alt+Enter / newline.
       if (event.shiftKey && event.key === "Enter") {
         if (event.type === "keydown") {
-          window.desktopApi.sendInput({ sessionId, data: "\x1b\r" });
+          sendPromptKey("\x1b\r");
         }
         return false;
       }
@@ -341,7 +416,7 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
       const pastedFilePaths = window.desktopApi.resolveClipboardFiles(Array.from(event.clipboardData?.files || []));
       if (pastedFilePaths.length > 0) {
         event.preventDefault();
-        window.desktopApi.sendInput({ sessionId, data: formatPathsForTerminal(pastedFilePaths) });
+        sendPromptKey(formatPathsForTerminal(pastedFilePaths));
         return;
       }
 
@@ -356,23 +431,20 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
         // Check for an image in the clipboard (e.g. screenshot Cmd+V)
         const imagePath = await window.desktopApi.readClipboardImage(sessionId);
         if (imagePath) {
-          window.desktopApi.sendInput({ sessionId, data: formatPathsForTerminal([imagePath]) });
+          sendPromptKey(formatPathsForTerminal([imagePath]));
           return;
         }
 
         const clipboardText = await window.desktopApi.readClipboardText();
         if (clipboardText) {
           const textPaths = clipboardPathsFromText(clipboardText);
-          window.desktopApi.sendInput({
-            sessionId,
-            data: textPaths.length > 0 ? formatPathsForTerminal(textPaths) : clipboardText,
-          });
+          sendPromptKey(textPaths.length > 0 ? formatPathsForTerminal(textPaths) : clipboardText);
           return;
         }
 
         const paths = await window.desktopApi.readClipboardFilePaths();
         if (paths && paths.length > 0) {
-          window.desktopApi.sendInput({ sessionId, data: formatPathsForTerminal(paths) });
+          sendPromptKey(formatPathsForTerminal(paths));
         }
       } catch {
         // Ignore clipboard failures in the terminal.
@@ -383,12 +455,26 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     if (pasteTarget) {
       pasteTarget.addEventListener("paste", handlePaste);
     }
+    const interactionTarget = containerRef.current;
+    const refocusAfterInteraction = () => {
+      keepTerminalInputFocused();
+    };
+    if (interactionTarget) {
+      interactionTarget.addEventListener("mousedown", refocusAfterInteraction);
+      interactionTarget.addEventListener("mouseup", refocusAfterInteraction);
+      interactionTarget.addEventListener("wheel", refocusAfterInteraction, { passive: true });
+    }
 
     return () => {
       clearResizeTimers();
 
       if (pasteTarget) {
         pasteTarget.removeEventListener("paste", handlePaste);
+      }
+      if (interactionTarget) {
+        interactionTarget.removeEventListener("mousedown", refocusAfterInteraction);
+        interactionTarget.removeEventListener("mouseup", refocusAfterInteraction);
+        interactionTarget.removeEventListener("wheel", refocusAfterInteraction);
       }
 
       disposed = true;
