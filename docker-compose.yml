@@ -37,6 +37,8 @@ services:
       - ./claude-data:/home/node/.claude
       # Mount Codex credentials with write access (for sessions and settings)
       - ./codex-data:/home/node/.codex
+      # Mount Azure CLI credentials with write access (so `az login` persists)
+      - ./azure-data:/home/node/.azure
       # Share skills/commands with each CLI home
       - ./claude-data/skills:/home/node/.claude/skills
       - ./claude-data/commands:/home/node/.claude/commands

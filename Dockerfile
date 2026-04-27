@@ -92,6 +92,10 @@ RUN ARCH=$(dpkg --print-architecture) && \
     dpkg -i gh_2.40.0_linux_${ARCH}.deb && \
     rm gh_2.40.0_linux_${ARCH}.deb
 
+# Install Azure CLI (official Microsoft install script; supports amd64 + arm64)
+RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install Go (detect architecture)
 RUN ARCH=$(dpkg --print-architecture) && \
     GO_ARCH=$(case ${ARCH} in amd64) echo "amd64" ;; arm64) echo "arm64" ;; *) echo "amd64" ;; esac) && \
@@ -143,10 +147,11 @@ RUN mkdir -p \
     /home/node/.cache/ms-playwright \
     /home/node/.claude \
     /home/node/.codex \
+    /home/node/.azure \
     /home/node/.config \
     /workspace \
     /home/node/go/bin && \
-    chown -R node:node /home/node/.cache /home/node/.claude /home/node/.codex /home/node/.config /workspace /home/node/go
+    chown -R node:node /home/node/.cache /home/node/.claude /home/node/.codex /home/node/.azure /home/node/.config /workspace /home/node/go
 
 # Copy Claude Code credentials from build context
 # This file is created by build.sh from macOS Keychain
@@ -163,6 +168,14 @@ RUN if [ -f /home/node/.codex/auth.json ]; then \
         chmod 600 /home/node/.codex/auth.json; \
     fi && \
     chown -R node:node /home/node/.codex
+
+# Copy Azure CLI credentials from build context (if they exist)
+# These files are created by build.sh from ~/.azure
+COPY .build-temp/.azure /home/node/.azure/
+RUN if [ -f /home/node/.azure/msal_token_cache.json ]; then \
+        chmod 600 /home/node/.azure/msal_token_cache.json; \
+    fi && \
+    chown -R node:node /home/node/.azure
 
 # Set up working directory
 WORKDIR /workspace

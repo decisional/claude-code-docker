@@ -3,6 +3,7 @@ workspace/
 shared/
 claude-data/
 codex-data/
+azure-data/
 git-data/
 .claude/*
 !.claude/skills/

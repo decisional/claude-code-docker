@@ -80,6 +80,27 @@ if [ -f "$HOME/.codex/auth.json" ]; then
     echo "✅ Codex credentials copied to codex-data"
 fi
 
+if [ ! -d "./azure-data" ]; then
+    mkdir -p ./azure-data
+    echo "✅ Created azure-data directory"
+fi
+
+# Copy Azure CLI credentials to azure-data if they exist.
+# We copy only auth/profile state and skip caches (logs/, telemetry/, commands/, commandIndex.json).
+if [ -d "$HOME/.azure" ]; then
+    AZ_FILES=(azureProfile.json clouds.config config msal_token_cache.json msal_http_cache.bin \
+              az.json az.sess az_survey.json versionCheck.json service_principal_entries.bin)
+    for f in "${AZ_FILES[@]}"; do
+        [ -f "$HOME/.azure/$f" ] && cp "$HOME/.azure/$f" ./azure-data/ 2>/dev/null || true
+    done
+    [ -f "./azure-data/msal_token_cache.json" ] && chmod 600 ./azure-data/msal_token_cache.json
+    [ -f "./azure-data/service_principal_entries.bin" ] && chmod 600 ./azure-data/service_principal_entries.bin
+    echo "✅ Azure CLI credentials copied to azure-data"
+else
+    echo "⚠️  No Azure CLI credentials found at $HOME/.azure"
+    echo "   To enable az: run 'az login' on your host, then rebuild"
+fi
+
 # Read GIT_REPO_URL and NPM_INSTALL_DIR from .env for build-time cloning and dep install
 BUILD_GIT_REPO_URL=""
 BUILD_GIT_CLONE_DIR=""
@@ -173,6 +194,27 @@ else
     echo "   To use Codex CLI, run 'codex' and login, then rebuild"
 fi
 
+# Copy Azure CLI credentials if they exist
+AZURE_DIR="$HOME/.azure"
+mkdir -p ./.build-temp/.azure
+if [ -d "$AZURE_DIR" ]; then
+    AZ_FILES=(azureProfile.json clouds.config config msal_token_cache.json msal_http_cache.bin \
+              az.json az.sess az_survey.json versionCheck.json service_principal_entries.bin)
+    for f in "${AZ_FILES[@]}"; do
+        [ -f "$AZURE_DIR/$f" ] && cp "$AZURE_DIR/$f" ./.build-temp/.azure/ 2>/dev/null || true
+    done
+    [ -f "./.build-temp/.azure/msal_token_cache.json" ] && chmod 600 ./.build-temp/.azure/msal_token_cache.json
+    [ -f "./.build-temp/.azure/service_principal_entries.bin" ] && chmod 600 ./.build-temp/.azure/service_principal_entries.bin
+    if [ -f "./.build-temp/.azure/azureProfile.json" ]; then
+        echo "✅ Azure CLI credentials copied"
+    else
+        echo "⚠️  No Azure CLI profile found in $AZURE_DIR (run 'az login' on host, then rebuild)"
+    fi
+else
+    echo "⚠️  No Azure CLI credentials found at $AZURE_DIR"
+    echo "   To use az CLI, run 'az login' on host, then rebuild"
+fi
+
 # Copy SSH keys to build-temp for build-time git clone (if available)
 if [ -d "$SSH_DIR" ] && ([ -f "$SSH_DIR/id_rsa" ] || [ -f "$SSH_DIR/id_ed25519" ]); then
     cp "$SSH_DIR"/id_* ./.build-temp/.ssh/ 2>/dev/null || true
@@ -188,6 +230,11 @@ fi
 CODEX_READY=false
 if [ -f "./.build-temp/.codex/auth.json" ]; then
     CODEX_READY=true
+fi
+
+AZURE_READY=false
+if [ -f "./.build-temp/.azure/azureProfile.json" ]; then
+    AZURE_READY=true
 fi
 
 # Build Docker image with credentials
@@ -222,6 +269,11 @@ if [ "$CODEX_READY" = true ]; then
     echo "  - Codex CLI: ✓ Ready"
 else
     echo "  - Codex CLI: ⚠ Not configured (run 'codex' and login, then rebuild)"
+fi
+if [ "$AZURE_READY" = true ]; then
+    echo "  - Azure CLI: ✓ Ready"
+else
+    echo "  - Azure CLI: ⚠ Not configured (run 'az login' on host, then rebuild)"
 fi
 if [ -n "$BUILD_GIT_REPO_URL" ]; then
     echo "  - Repository: ✓ Pre-cloned ($BUILD_GIT_REPO_URL)"
