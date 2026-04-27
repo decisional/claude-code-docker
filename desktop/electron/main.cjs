@@ -133,7 +133,7 @@ function buildContainerName(runtime, name) {
   return `${buildProjectName(runtime, name)}-claude-code-1`;
 }
 
-const SUPPORTED_REPOS = new Set(["autodex", "openclaw"]);
+const SUPPORTED_REPOS = new Set(["autodex", "opendex"]);
 const DEFAULT_REPO = "autodex";
 
 function normalizeRepoKey(value) {

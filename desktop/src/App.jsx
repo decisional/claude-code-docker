@@ -1291,13 +1291,13 @@ function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, d
                   autodex
                 </button>
                 <button
-                  aria-checked={repo === "openclaw"}
-                  className={repo === "openclaw" ? "repo-button active" : "repo-button"}
+                  aria-checked={repo === "opendex"}
+                  className={repo === "opendex" ? "repo-button active" : "repo-button"}
                   role="radio"
                   type="button"
-                  onClick={() => setRepo("openclaw")}
+                  onClick={() => setRepo("opendex")}
                 >
-                  openclaw
+                  opendex
                 </button>
               </div>
             </div>

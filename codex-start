@@ -1,6 +1,6 @@
 #!/bin/bash
 # Start a new Codex CLI instance or attach to existing one
-# Usage: ./codex-start [instance-name] [--branch branch-name] [--tmux] [--repo autodex|openclaw]
+# Usage: ./codex-start [instance-name] [--branch branch-name] [--tmux] [--repo autodex|opendex]
 # If no name provided, generates a random name like "happy-tiger"
 # --repo selects which repo to clone into the container (default: autodex from .env).
 
@@ -84,11 +84,11 @@ case "$REPO_OVERRIDE" in
     ""|autodex)
         REPO_OVERRIDE="autodex"
         ;;
-    openclaw)
-        RESOLVED_REPO_URL="git@github.com:decisional/openclaw.git"
+    opendex)
+        RESOLVED_REPO_URL="git@github.com:decisional/opendex.git"
         ;;
     *)
-        echo "⚠ Unknown --repo '$REPO_OVERRIDE' (expected: autodex, openclaw). Falling back to default." >&2
+        echo "⚠ Unknown --repo '$REPO_OVERRIDE' (expected: autodex, opendex). Falling back to default." >&2
         REPO_OVERRIDE="autodex"
         ;;
 esac
