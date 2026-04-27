@@ -632,6 +632,23 @@ input:focus {
   position: relative;
 }
 
+.session-item-wrap.dragging {
+  opacity: 0.45;
+}
+
+.session-item-wrap.drag-over::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 0;
+  height: 2px;
+  background: var(--accent, #4b9eff);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 2;
+}
+
 .session-dots-btn {
   width: 24px;
   height: 24px;

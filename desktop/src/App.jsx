@@ -11,6 +11,7 @@ const terminalRepaintRegistry = new Map();
 const SIDEBAR_STORAGE_KEY = "autodex-desktop:sidebar-collapsed";
 const REVIEW_PANEL_STORAGE_KEY = "autodex-desktop:review-panel-open";
 const LINEAR_KEY_STORAGE_KEY = "autodex-desktop:linear-configured";
+const SESSION_ORDER_STORAGE_KEY = "autodex-desktop:session-order";
 const SIDEBAR_SHORTCUT_KEY = "b";
 const INITIAL_REPAINT_DELAYS = [360, 560, 820];
 const WINDOW_REPAINT_DELAYS = [60, 220, 480];
@@ -1727,8 +1728,48 @@ export default function App() {
   const [showLinearBrowser, setShowLinearBrowser] = useState(false);
   const [activeTerminalTabId, setActiveTerminalTabId] = useState("");
   const [contextMenuSessionId, setContextMenuSessionId] = useState(null);
+  const [sessionOrder, setSessionOrder] = useState(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(SESSION_ORDER_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter(id => typeof id === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+  const [draggingSessionId, setDraggingSessionId] = useState(null);
+  const [dragOverSessionId, setDragOverSessionId] = useState(null);
   const activeSessionIdRef = useRef("");
   const sessionSignalTimersRef = useRef({});
+
+  const orderedSessions = useMemo(() => {
+    if (sessions.length === 0) return sessions;
+    const byId = new Map(sessions.map(session => [session.id, session]));
+    const result = [];
+    const seen = new Set();
+    for (const id of sessionOrder) {
+      const session = byId.get(id);
+      if (session && !seen.has(id)) {
+        result.push(session);
+        seen.add(id);
+      }
+    }
+    for (const session of sessions) {
+      if (!seen.has(session.id)) {
+        result.push(session);
+      }
+    }
+    return result;
+  }, [sessions, sessionOrder]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SESSION_ORDER_STORAGE_KEY, JSON.stringify(sessionOrder));
+    } catch {
+      // localStorage may be unavailable; ignore
+    }
+  }, [sessionOrder]);
 
   const activeSession = useMemo(() => sessions.find(session => session.id === activeSessionId), [sessions, activeSessionId]);
 
@@ -1761,6 +1802,50 @@ export default function App() {
     window.addEventListener("click", handler);
     return () => window.removeEventListener("click", handler);
   }, [contextMenuSessionId]);
+
+  const reorderSessions = (sourceId, targetId) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const currentIds = orderedSessions.map(session => session.id);
+    const fromIndex = currentIds.indexOf(sourceId);
+    const toIndex = currentIds.indexOf(targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
+    const next = currentIds.slice();
+    next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, sourceId);
+    setSessionOrder(next);
+  };
+
+  const handleSessionDragStart = (event, sessionId) => {
+    setDraggingSessionId(sessionId);
+    event.dataTransfer.effectAllowed = "move";
+    try {
+      event.dataTransfer.setData("text/plain", sessionId);
+    } catch {
+      // some browsers throw on certain platforms; ignore
+    }
+  };
+
+  const handleSessionDragOver = (event, sessionId) => {
+    if (!draggingSessionId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (dragOverSessionId !== sessionId) {
+      setDragOverSessionId(sessionId);
+    }
+  };
+
+  const handleSessionDrop = (event, sessionId) => {
+    event.preventDefault();
+    const sourceId = draggingSessionId || event.dataTransfer.getData("text/plain");
+    reorderSessions(sourceId, sessionId);
+    setDraggingSessionId(null);
+    setDragOverSessionId(null);
+  };
+
+  const handleSessionDragEnd = () => {
+    setDraggingSessionId(null);
+    setDragOverSessionId(null);
+  };
 
   const closeActiveSession = () => {
     const nextActiveSession = sessions.find(session => session.id === activeSessionIdRef.current);
@@ -1856,16 +1941,16 @@ export default function App() {
       }
 
       // Cmd+[ / Cmd+] — previous/next session
-      if ((key === "[" || key === "]") && mod && sessions.length > 0) {
+      if ((key === "[" || key === "]") && mod && orderedSessions.length > 0) {
         event.preventDefault();
-        const currentIndex = sessions.findIndex(s => s.id === activeSessionIdRef.current);
+        const currentIndex = orderedSessions.findIndex(s => s.id === activeSessionIdRef.current);
         let nextIndex;
         if (key === "]") {
-          nextIndex = currentIndex < sessions.length - 1 ? currentIndex + 1 : 0;
+          nextIndex = currentIndex < orderedSessions.length - 1 ? currentIndex + 1 : 0;
         } else {
-          nextIndex = currentIndex > 0 ? currentIndex - 1 : sessions.length - 1;
+          nextIndex = currentIndex > 0 ? currentIndex - 1 : orderedSessions.length - 1;
         }
-        selectSession(sessions[nextIndex].id);
+        selectSession(orderedSessions[nextIndex].id);
         return;
       }
 
@@ -1873,8 +1958,8 @@ export default function App() {
       if (mod && !event.shiftKey && event.key >= "1" && event.key <= "9") {
         event.preventDefault();
         const index = parseInt(event.key, 10) - 1;
-        if (index < sessions.length) {
-          selectSession(sessions[index].id);
+        if (index < orderedSessions.length) {
+          selectSession(orderedSessions[index].id);
         }
         return;
       }
@@ -1882,7 +1967,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [sessions]);
+  }, [orderedSessions]);
 
   useEffect(() => {
     const offCloseActiveSession = window.desktopApi.onCloseActiveSession(() => {
@@ -2176,8 +2261,23 @@ export default function App() {
                 </div>
               ) : null}
 
-              {sessions.map(session => (
-                <div className="session-item-wrap" key={session.id}>
+              {orderedSessions.map(session => (
+                <div
+                  className={[
+                    "session-item-wrap",
+                    draggingSessionId === session.id && "dragging",
+                    dragOverSessionId === session.id && draggingSessionId && draggingSessionId !== session.id && "drag-over",
+                  ].filter(Boolean).join(" ")}
+                  key={session.id}
+                  draggable={!sidebarCollapsed}
+                  onDragStart={event => handleSessionDragStart(event, session.id)}
+                  onDragOver={event => handleSessionDragOver(event, session.id)}
+                  onDragLeave={() => {
+                    if (dragOverSessionId === session.id) setDragOverSessionId(null);
+                  }}
+                  onDrop={event => handleSessionDrop(event, session.id)}
+                  onDragEnd={handleSessionDragEnd}
+                >
                   <button
                     className={[
                       "session-item",
