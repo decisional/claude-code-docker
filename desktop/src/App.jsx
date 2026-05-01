@@ -17,6 +17,8 @@ const INITIAL_REPAINT_DELAYS = [360, 560, 820];
 const WINDOW_REPAINT_DELAYS = [60, 220, 480];
 const VIEWPORT_PAGE_KEYS = new Set(["PageUp", "PageDown"]);
 const VIEWPORT_LINE_KEYS = new Set(["ArrowUp", "ArrowDown"]);
+const CODEX_SHIFT_ENTER_SEQUENCE = "\x1b[13;2u";
+const LEGACY_MULTILINE_SEQUENCE = "\x1b\r";
 
 const STATUS_LABELS = {
   attached: "Attached",
@@ -37,6 +39,12 @@ function runtimeLabel(runtime) {
 
 function statusLabel(status) {
   return STATUS_LABELS[status] || status || "Unknown";
+}
+
+function multilineKeySequence(sessionId) {
+  return String(sessionId || "").startsWith("codex:")
+    ? CODEX_SHIFT_ENTER_SEQUENCE
+    : LEGACY_MULTILINE_SEQUENCE;
 }
 
 function repaintTerminal(sessionId, { focus = false } = {}) {
@@ -401,12 +409,12 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
         sendPromptKey("\x15");
         return false;
       }
-      // Shift+Enter inserts a newline instead of submitting.
-      // Send Escape + carriage-return (\x1b\r) which terminal apps like
-      // Claude Code and Codex interpret as Alt+Enter / newline.
+      // Shift+Enter inserts a newline instead of submitting. Current Codex
+      // expects real modified-Enter input via CSI u; older CLIs still use the
+      // legacy Alt+Enter sequence.
       if (event.shiftKey && event.key === "Enter") {
         if (event.type === "keydown") {
-          sendPromptKey("\x1b\r");
+          sendPromptKey(multilineKeySequence(sessionId));
         }
         return false;
       }

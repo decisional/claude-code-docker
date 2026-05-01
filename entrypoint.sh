@@ -438,6 +438,8 @@ set -g status off
 set -g mouse on
 set -g default-terminal "xterm-256color"
 set -g aggressive-resize on
+set -s extended-keys always
+set -g terminal-features[2] "xterm*:extkeys"
 
 # Scroll 1 line per wheel event instead of the default 5 so that the
 # desktop app's throttled wheel handler produces smooth, continuous
@@ -455,6 +457,8 @@ TMUXCONF
         if tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
             echo "🔄 Reattaching to existing session..."
             echo ""
+            tmux -f "$TMUX_CONF" set-option -s extended-keys always 2>/dev/null || true
+            tmux -f "$TMUX_CONF" set-option -gq terminal-features[2] "xterm*:extkeys" 2>/dev/null || true
             exec tmux -u -f "$TMUX_CONF" attach-session -d -t "$TMUX_SESSION"
         else
             echo "▶ Starting new session in tmux..."

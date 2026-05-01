@@ -205,6 +205,8 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         if docker exec "$CONTAINER_NAME" tmux has-session -t llm-session 2>/dev/null; then
             echo "🔄 Reattaching to existing tmux session..."
             echo ""
+            docker exec "$CONTAINER_NAME" tmux set-option -s extended-keys always 2>/dev/null || true
+            docker exec "$CONTAINER_NAME" tmux set-option -gq terminal-features[2] "xterm*:extkeys" 2>/dev/null || true
             docker exec -it "$CONTAINER_NAME" tmux -u attach-session -d -t llm-session
         else
             # No tmux session — run entrypoint to start a fresh one
