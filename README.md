@@ -36,6 +36,37 @@ npm install
 npm run dev
 ```
 
+## Warp Tab Workflow
+
+If you prefer using Warp directly, `autodex-warp` opens Autodex sessions as tabs in a single Warp launch configuration. This is the no-tmux flow: Warp owns the visible terminal tab and the session attaches through `docker exec`.
+
+```bash
+# Show existing Claude/Codex Docker sessions
+./autodex-warp list
+
+# Open all running Autodex Docker sessions as Warp tabs
+./autodex-warp open
+
+# Include stopped sessions too
+./autodex-warp open --all
+
+# Create/open a new Claude tab without tmux
+./autodex-warp open claude my-task --branch feature/my-task --repo autodex
+
+# Create/open a new Codex tab without tmux
+./autodex-warp open codex reviewer --repo autodex
+```
+
+Use Warp's vertical tabs/sidebar to switch between sessions instead of arranging sessions as split panes.
+
+If Warp opens the agent conversation/history sidebar instead of a real tab sidebar, enable Warp's vertical tab mode:
+
+```bash
+./autodex-warp vertical-tabs-settings
+```
+
+Add the printed settings to `~/.warp/settings.toml`, then restart/reload Warp and toggle the Tabs Panel with `Cmd+Shift+B`. The Tabs Panel is separate from Warp's agent conversation/history panel.
+
 ## Setup
 
 ### Option 1: Build Image with Credentials Baked In (Recommended)
