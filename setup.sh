@@ -43,6 +43,7 @@ fi
 echo ""
 echo "Setting up Git configuration..."
 mkdir -p "$LOCAL_GIT_DIR"
+mkdir -p "$LOCAL_GIT_DIR/cache"
 
 # Copy gitconfig if it exists
 if [ -f "$GIT_CONFIG" ]; then

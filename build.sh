@@ -16,6 +16,7 @@ GIT_CONFIG="$HOME/.gitconfig"
 SSH_DIR="$HOME/.ssh"
 
 mkdir -p "$LOCAL_GIT_DIR"
+mkdir -p "$LOCAL_GIT_DIR/cache"
 
 # Copy gitconfig if it exists
 if [ -f "$GIT_CONFIG" ]; then

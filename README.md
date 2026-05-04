@@ -383,6 +383,8 @@ GIT_CLONE_DIR=my-project  # Optional: defaults to repo name
 
 **How it works:**
 - On container startup, if `GIT_REPO_URL` is set, the entrypoint script clones the repo
+- A shared bare mirror cache is kept in `./git-data/cache` and reused by new containers
+- First clone warms the cache; later clones mostly reuse local objects and only fetch deltas
 - The repo is cloned into `/workspace/<directory-name>`
 - If the directory already exists, cloning is skipped (preserves your local changes)
 - Your working directory is automatically set to the cloned repo
