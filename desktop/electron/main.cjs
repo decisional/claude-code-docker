@@ -8,6 +8,8 @@ const { execFile, spawn } = require("child_process");
 const pty = require("node-pty");
 
 const MAX_TERMINAL_HISTORY_BYTES = 8 * 1024 * 1024;
+const STARTUP_INPUT_READY_MARKER = "\u001b]1337;AutodexInputReady\u0007";
+const MAX_STARTUP_INPUT_BUFFER_CHARS = 64 * 1024;
 const liveSessions = new Map();
 const notificationCooldowns = new Map();
 const terminalHistory = new Map();
@@ -174,6 +176,61 @@ function appendTerminalHistory(sessionId, data) {
 
   terminalHistory.set(sessionId, entry);
   return entry.lastSeq;
+}
+
+function stripStartupInputReadyMarkers(live, data) {
+  let combined = `${live.startupInputMarkerRemainder || ""}${data}`;
+  let stripped = "";
+  let ready = false;
+
+  while (combined.length > 0) {
+    const markerIndex = combined.indexOf(STARTUP_INPUT_READY_MARKER);
+    if (markerIndex !== -1) {
+      stripped += combined.slice(0, markerIndex);
+      combined = combined.slice(markerIndex + STARTUP_INPUT_READY_MARKER.length);
+      ready = true;
+      continue;
+    }
+
+    let keepLength = 0;
+    const maxKeepLength = Math.min(STARTUP_INPUT_READY_MARKER.length - 1, combined.length);
+    for (let length = maxKeepLength; length > 0; length -= 1) {
+      if (STARTUP_INPUT_READY_MARKER.startsWith(combined.slice(-length))) {
+        keepLength = length;
+        break;
+      }
+    }
+
+    stripped += combined.slice(0, combined.length - keepLength);
+    live.startupInputMarkerRemainder = combined.slice(combined.length - keepLength);
+    return { data: stripped, ready };
+  }
+
+  live.startupInputMarkerRemainder = "";
+  return { data: stripped, ready };
+}
+
+function releaseStartupInput(sessionId) {
+  const live = liveSessions.get(sessionId);
+  if (!live || !live.startupInputBuffering) {
+    return;
+  }
+
+  live.startupInputBuffering = false;
+  live.startupInputMarkerRemainder = "";
+
+  const pendingInput = live.pendingStartupInput || "";
+  live.pendingStartupInput = "";
+  if (pendingInput) {
+    live.term.write(pendingInput);
+  }
+}
+
+function bufferStartupInput(live, data) {
+  live.pendingStartupInput = `${live.pendingStartupInput || ""}${data}`;
+  if (live.pendingStartupInput.length > MAX_STARTUP_INPUT_BUFFER_CHARS) {
+    live.pendingStartupInput = live.pendingStartupInput.slice(-MAX_STARTUP_INPUT_BUFFER_CHARS);
+  }
 }
 
 function readTerminalHistory(sessionId) {
@@ -771,7 +828,7 @@ async function startInteractiveSession(session, mode = "start", size) {
   }
 
   const repoPath = currentRepoPath();
-  const env = buildRuntimeEnv();
+  const env = buildRuntimeEnv({ AUTODEX_DESKTOP_INPUT_READY_MARKER: "1" });
 
   let term;
   try {
@@ -797,7 +854,12 @@ async function startInteractiveSession(session, mode = "start", size) {
     throw error;
   }
 
-  liveSessions.set(session.id, { term });
+  liveSessions.set(session.id, {
+    term,
+    startupInputBuffering: true,
+    pendingStartupInput: "",
+    startupInputMarkerRemainder: "",
+  });
 
   upsertSession({
     ...session,
@@ -809,10 +871,19 @@ async function startInteractiveSession(session, mode = "start", size) {
   emit("sessions:changed", appState.sessions);
 
   term.onData(data => {
-    const seq = appendTerminalHistory(session.id, data);
-    emit("terminal:data", { sessionId: session.id, seq, data });
+    const live = liveSessions.get(session.id);
+    const normalized = live?.startupInputBuffering ? stripStartupInputReadyMarkers(live, data) : { data, ready: false };
 
-    if (!mainWindow?.isFocused()) {
+    if (normalized.data) {
+      const seq = appendTerminalHistory(session.id, normalized.data);
+      emit("terminal:data", { sessionId: session.id, seq, data: normalized.data });
+    }
+
+    if (normalized.ready) {
+      releaseStartupInput(session.id);
+    }
+
+    if (normalized.data && !mainWindow?.isFocused()) {
       notifyIfHidden(session.name, "Session received output.", {
         cooldownKey: `session-output:${session.id}`,
         cooldownMs: 15000,
@@ -1344,6 +1415,19 @@ ipcMain.handle("sessions:input", async (_event, payload) => {
   if (!live) {
     return false;
   }
+
+  if (live.startupInputBuffering) {
+    if (payload.data === "\x03") {
+      live.pendingStartupInput = "";
+      live.startupInputBuffering = false;
+      live.term.write(payload.data);
+      return true;
+    }
+
+    bufferStartupInput(live, payload.data);
+    return true;
+  }
+
   live.term.write(payload.data);
   return true;
 });

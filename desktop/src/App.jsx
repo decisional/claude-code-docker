@@ -17,6 +17,7 @@ const INITIAL_REPAINT_DELAYS = [360, 560, 820];
 const WINDOW_REPAINT_DELAYS = [60, 220, 480];
 const VIEWPORT_PAGE_KEYS = new Set(["PageUp", "PageDown"]);
 const VIEWPORT_LINE_KEYS = new Set(["ArrowUp", "ArrowDown"]);
+const SESSION_SIGNAL_VIEW_SUPPRESS_MS = 2500;
 
 const STATUS_LABELS = {
   attached: "Attached",
@@ -53,6 +54,14 @@ function repaintTerminal(sessionId, { focus = false } = {}) {
   }
 
   return false;
+}
+
+function hasVisibleTerminalSignalData(data) {
+  return String(data || "")
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .trim().length > 0;
 }
 
 function normalizeSessionName(value) {
@@ -1742,6 +1751,7 @@ export default function App() {
   const [dragOverSessionId, setDragOverSessionId] = useState(null);
   const activeSessionIdRef = useRef("");
   const sessionSignalTimersRef = useRef({});
+  const sessionSignalSuppressUntilRef = useRef({});
 
   const orderedSessions = useMemo(() => {
     if (sessions.length === 0) return sessions;
@@ -2021,6 +2031,12 @@ export default function App() {
           }
         });
 
+        Object.keys(sessionSignalSuppressUntilRef.current).forEach(sessionId => {
+          if (!validSessionIds.has(sessionId)) {
+            delete sessionSignalSuppressUntilRef.current[sessionId];
+          }
+        });
+
         return Object.fromEntries(Object.entries(current).filter(([sessionId]) => validSessionIds.has(sessionId)));
       });
 
@@ -2031,11 +2047,15 @@ export default function App() {
       }
     });
 
-    const offTerminal = window.desktopApi.onTerminalData(({ sessionId }) => {
+    const offTerminal = window.desktopApi.onTerminalData(({ sessionId, data }) => {
       // For terminal tabs, sessionId is "terminal:name:tab-X" — extract base session ID
       const baseId = sessionId.startsWith("terminal:") && sessionId.split(":").length > 2
         ? sessionId.split(":").slice(0, 2).join(":")
         : sessionId;
+      const suppressUntil = sessionSignalSuppressUntilRef.current[baseId] || 0;
+      if (!hasVisibleTerminalSignalData(data) || Date.now() < suppressUntil) {
+        return;
+      }
       if (baseId !== activeSessionIdRef.current) {
         clearSignalTimer(baseId);
         setSessionSignals(current => ({ ...current, [baseId]: "running" }));
@@ -2060,6 +2080,7 @@ export default function App() {
       ignore = true;
       Object.values(sessionSignalTimersRef.current).forEach(clearTimeout);
       sessionSignalTimersRef.current = {};
+      sessionSignalSuppressUntilRef.current = {};
       offSessions();
       offTerminal();
       offExit();
@@ -2089,6 +2110,13 @@ export default function App() {
   };
 
   const selectSession = async sessionId => {
+    const now = Date.now();
+    const previousSessionId = activeSessionIdRef.current;
+    if (previousSessionId) {
+      sessionSignalSuppressUntilRef.current[previousSessionId] = now + SESSION_SIGNAL_VIEW_SUPPRESS_MS;
+    }
+    sessionSignalSuppressUntilRef.current[sessionId] = now + SESSION_SIGNAL_VIEW_SUPPRESS_MS;
+
     setActiveSessionId(sessionId);
 
     const timer = sessionSignalTimersRef.current[sessionId];
