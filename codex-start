@@ -42,6 +42,11 @@ sync_opendex_key() {
 update_codex_cli() {
     local container_name="$1"
 
+    if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ] && [ "${CODEX_AUTO_UPDATE:-}" != "true" ]; then
+        echo "  Skipping Codex CLI auto-update during Desktop startup"
+        return 0
+    fi
+
     echo "  Updating Codex CLI to latest..."
     if docker exec -u 0 "$container_name" sh -lc "npm install -g @openai/codex@latest" >/tmp/codex-update.log 2>&1; then
         local codex_version

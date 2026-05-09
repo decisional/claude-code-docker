@@ -160,8 +160,8 @@ confirm_dangerous_startup_prompt() {
 
         pane_text=$(tmux -f "$tmux_conf" capture-pane -p -t "$tmux_session" -S -80 2>/dev/null || true)
 
-        if printf "%s\n" "$pane_text" | grep -Eiq "danger|bypass|skip[- ]permissions|sandbox|unsafe"; then
-            if printf "%s\n" "$pane_text" | grep -Eiq "allow|exit|continue"; then
+        if printf "%s\n" "$pane_text" | grep -Eiq "danger|bypass|skip[- ]permissions|sandbox|unsafe|untrusted|trust the contents|higher risk"; then
+            if printf "%s\n" "$pane_text" | grep -Eiq "allow|exit|continue|quit|yes|no|press enter"; then
                 tmux -f "$tmux_conf" send-keys -t "$tmux_session" "$confirm_key"
                 return 0
             fi
