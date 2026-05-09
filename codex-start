@@ -16,6 +16,12 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
+emit_desktop_input_ready_marker() {
+    if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
+        printf '\033]1337;AutodexInputReady\a'
+    fi
+}
+
 sync_opendex_key() {
     local source_key="$HOME/.ssh/openclawcodex.pem"
     local target_dir="$SCRIPT_DIR/git-data/.ssh"
@@ -129,6 +135,9 @@ echo ""
 # Build environment override for branch if specified
 ENV_OVERRIDE="-e LLM_TYPE=codex -e USE_TMUX=$USE_TMUX"
 VOLUME_OVERRIDE=""
+if [ -n "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" ]; then
+    ENV_OVERRIDE="$ENV_OVERRIDE -e AUTODEX_DESKTOP_INPUT_READY_MARKER=$AUTODEX_DESKTOP_INPUT_READY_MARKER"
+fi
 if [ -n "$GIT_BRANCH_OVERRIDE" ]; then
     ENV_OVERRIDE="$ENV_OVERRIDE -e GIT_BRANCH=$GIT_BRANCH_OVERRIDE"
     echo "📌 Using branch: $GIT_BRANCH_OVERRIDE"
@@ -205,6 +214,7 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         if docker exec "$CONTAINER_NAME" tmux has-session -t llm-session 2>/dev/null; then
             echo "🔄 Reattaching to existing tmux session..."
             echo ""
+            emit_desktop_input_ready_marker
             docker exec -it "$CONTAINER_NAME" tmux -u attach-session -d -t llm-session
         else
             # No tmux session — run entrypoint to start a fresh one

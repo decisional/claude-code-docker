@@ -138,6 +138,40 @@ install_dependencies() {
     fi
 }
 
+emit_desktop_input_ready_marker() {
+    if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
+        printf '\033]1337;AutodexInputReady\a'
+    fi
+}
+
+confirm_dangerous_startup_prompt() {
+    local tmux_conf="$1"
+    local tmux_session="$2"
+    local confirm_key="$3"
+    local attempts=40
+    local pane_text=""
+
+    [ -n "$confirm_key" ] || return 0
+
+    while [ "$attempts" -gt 0 ]; do
+        if ! tmux -f "$tmux_conf" has-session -t "$tmux_session" 2>/dev/null; then
+            return 0
+        fi
+
+        pane_text=$(tmux -f "$tmux_conf" capture-pane -p -t "$tmux_session" -S -80 2>/dev/null || true)
+
+        if printf "%s\n" "$pane_text" | grep -Eiq "danger|bypass|skip[- ]permissions|sandbox|unsafe"; then
+            if printf "%s\n" "$pane_text" | grep -Eiq "allow|exit|continue"; then
+                tmux -f "$tmux_conf" send-keys -t "$tmux_session" "$confirm_key"
+                return 0
+            fi
+        fi
+
+        sleep 0.25
+        attempts=$((attempts - 1))
+    done
+}
+
 
 # Determine which LLM we're using
 LLM_NAME="${LLM_TYPE:-claude}"
@@ -386,6 +420,8 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
         LLM_NAME="codex"
     fi
 
+    DANGEROUS_PROMPT_CHOICE=""
+
     if [ "$LLM_NAME" = "codex" ]; then
         # Launch OpenAI Codex CLI
         LLM_CMD="codex"
@@ -400,6 +436,7 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
         # This disables all approval prompts and sandboxing
         if [ "$CODEX_YOLO" = "true" ]; then
             LLM_CMD="$LLM_CMD --yolo"
+            DANGEROUS_PROMPT_CHOICE="1"
             echo "⚠️  Running with --yolo flag"
             echo "    This bypasses all approval prompts and sandboxing - use only in trusted environments"
         # Or add --ask-for-approval never for just disabling prompts
@@ -419,6 +456,7 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
         # This bypasses all permission checks (includes both skip-permissions and dangerously)
         if [ "$CLAUDE_SKIP_PERMISSIONS" = "true" ]; then
             LLM_CMD="$LLM_CMD --dangerously-skip-permissions"
+            DANGEROUS_PROMPT_CHOICE="2"
             echo "⚠️  Running with --dangerously-skip-permissions flag"
             echo "    This bypasses all permission checks - use only in trusted sandboxes"
         fi
@@ -455,12 +493,14 @@ TMUXCONF
         if tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
             echo "🔄 Reattaching to existing session..."
             echo ""
+            emit_desktop_input_ready_marker
             exec tmux -u -f "$TMUX_CONF" attach-session -d -t "$TMUX_SESSION"
         else
             echo "▶ Starting new session in tmux..."
             echo ""
             # Start detached so we can send /effort max before attaching
             tmux -u -f "$TMUX_CONF" new-session -d -s "$TMUX_SESSION" "$LLM_CMD $*"
+            confirm_dangerous_startup_prompt "$TMUX_CONF" "$TMUX_SESSION" "$DANGEROUS_PROMPT_CHOICE"
             if [ "$LLM_NAME" = "claude" ]; then
                 sleep 3
                 # If the CLI crashed during startup the tmux session is already
@@ -479,6 +519,7 @@ TMUXCONF
                 echo "⚠ tmux session exited before attach; re-running without tmux to surface the error."
                 exec $LLM_CMD "$@"
             fi
+            emit_desktop_input_ready_marker
             exec tmux -u -f "$TMUX_CONF" attach-session -d -t "$TMUX_SESSION"
         fi
     fi

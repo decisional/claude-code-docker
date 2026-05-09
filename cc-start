@@ -17,6 +17,12 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
+emit_desktop_input_ready_marker() {
+    if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
+        printf '\033]1337;AutodexInputReady\a'
+    fi
+}
+
 sync_opendex_key() {
     local source_key="$HOME/.ssh/openclawcodex.pem"
     local target_dir="$SCRIPT_DIR/git-data/.ssh"
@@ -198,13 +204,14 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         if docker exec "$CONTAINER_NAME" tmux has-session -t llm-session 2>/dev/null; then
             echo "🔄 Reattaching to existing tmux session..."
             echo ""
+            emit_desktop_input_ready_marker
             docker-compose -p "$PROJECT_NAME" exec -it claude-code tmux -u attach-session -d -t llm-session
         else
             # No tmux session — run entrypoint to start a fresh one
-            docker-compose -p "$PROJECT_NAME" exec -e USE_TMUX="$USE_TMUX" -it claude-code /entrypoint.sh claude
+            docker-compose -p "$PROJECT_NAME" exec -e USE_TMUX="$USE_TMUX" -e AUTODEX_DESKTOP_INPUT_READY_MARKER="${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" -it claude-code /entrypoint.sh claude
         fi
     else
-        docker-compose -p "$PROJECT_NAME" exec -e USE_TMUX="$USE_TMUX" -it claude-code /entrypoint.sh claude
+        docker-compose -p "$PROJECT_NAME" exec -e USE_TMUX="$USE_TMUX" -e AUTODEX_DESKTOP_INPUT_READY_MARKER="${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" -it claude-code /entrypoint.sh claude
     fi
 else
     # Check if container exists but is stopped
@@ -294,5 +301,5 @@ else
 
     echo "  Launching Claude Code..."
     echo ""
-    docker-compose -p "$PROJECT_NAME" exec -e USE_TMUX="$USE_TMUX" -it claude-code /entrypoint.sh claude
+    docker-compose -p "$PROJECT_NAME" exec -e USE_TMUX="$USE_TMUX" -e AUTODEX_DESKTOP_INPUT_READY_MARKER="${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" -it claude-code /entrypoint.sh claude
 fi
