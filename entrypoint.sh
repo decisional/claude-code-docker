@@ -258,7 +258,7 @@ if [ -n "$GIT_REPO_URL" ]; then
             cd "$TARGET_DIR"
             if [ "$RESET_TO_MAIN" = "true" ]; then
                 echo "🔄 Resetting to latest main..."
-                git fetch origin main && git checkout main && git pull origin main && echo "✓ Reset to latest main" || echo "⚠ Could not reset to main (may have local changes)"
+                git checkout main >/dev/null 2>&1 && git pull --ff-only origin main && echo "✓ Reset to latest main" || echo "⚠ Could not reset to main (may have local changes)"
             else
                 echo "✓ Preserving current branch: $(git branch --show-current)"
             fi
@@ -266,22 +266,23 @@ if [ -n "$GIT_REPO_URL" ]; then
             # Repository was pre-cloned during image build - pull latest and install deps
             echo "📦 Using pre-cloned repository at $TARGET_DIR"
             cd "$TARGET_DIR"
-            echo "🔄 Pulling latest changes..."
-            git fetch origin main && git pull origin main && echo "✓ Updated to latest main" || echo "⚠ Could not pull latest (continuing with build-time snapshot)"
+            TARGET_BRANCH="${GIT_BRANCH:-main}"
 
-            # Handle branch switching if GIT_BRANCH is specified
-            if [ -n "$GIT_BRANCH" ]; then
-                if GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin "$GIT_BRANCH" 2>/dev/null | grep -q "refs/heads/$GIT_BRANCH"; then
-                    echo "Switching to branch '$GIT_BRANCH'..."
-                    git fetch origin "$GIT_BRANCH" && git checkout "$GIT_BRANCH" && git pull origin "$GIT_BRANCH" \
-                        && echo "✓ Switched to branch '$GIT_BRANCH'" \
-                        || echo "⚠ Could not switch to branch '$GIT_BRANCH'"
-                else
-                    echo "Creating new branch '$GIT_BRANCH'..."
-                    git checkout -b "$GIT_BRANCH" \
-                        && echo "✓ Created new branch '$GIT_BRANCH'" \
-                        || echo "⚠ Could not create branch '$GIT_BRANCH'"
-                fi
+            if [ "$TARGET_BRANCH" = "main" ]; then
+                echo "🔄 Pulling latest changes..."
+                git checkout main >/dev/null 2>&1 && git pull --ff-only origin main && echo "✓ Updated to latest main" || echo "⚠ Could not pull latest (continuing with build-time snapshot)"
+            elif GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin "$TARGET_BRANCH" 2>/dev/null | grep -q "refs/heads/$TARGET_BRANCH"; then
+                echo "Switching to branch '$TARGET_BRANCH'..."
+                git fetch origin "$TARGET_BRANCH" && git checkout -B "$TARGET_BRANCH" FETCH_HEAD >/dev/null \
+                    && echo "✓ Switched to branch '$TARGET_BRANCH'" \
+                    || echo "⚠ Could not switch to branch '$TARGET_BRANCH'"
+            else
+                echo "🔄 Pulling latest main..."
+                git checkout main >/dev/null 2>&1 && git pull --ff-only origin main && echo "✓ Updated to latest main" || echo "⚠ Could not pull latest (continuing with build-time snapshot)"
+                echo "Creating new branch '$TARGET_BRANCH'..."
+                git checkout -b "$TARGET_BRANCH" >/dev/null \
+                    && echo "✓ Created new branch '$TARGET_BRANCH'" \
+                    || echo "⚠ Could not create branch '$TARGET_BRANCH'"
             fi
 
             # Install project dependencies
