@@ -161,7 +161,9 @@ if [ -n "$HOST_MOUNT_DIR" ] && [ -d "$HOST_MOUNT_DIR" ]; then
     echo ""
 fi
 
-sync_opendex_key
+if [ "$REPO_OVERRIDE" = "opendex" ]; then
+    sync_opendex_key
+fi
 
 # Check if container already exists and is running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
@@ -277,7 +279,6 @@ else
     # Copy OpenAI config if it exists locally
     if [ -d "$HOME/.openai" ]; then
         echo "  Copying OpenAI configuration..."
-        sleep 1  # Wait for container to be fully ready
         docker cp "$HOME/.openai" "${CONTAINER_NAME}:/home/node/.openai" 2>/dev/null || echo "  (Could not copy OpenAI config, continuing anyway...)"
     fi
 

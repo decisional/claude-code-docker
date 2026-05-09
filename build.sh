@@ -5,6 +5,28 @@
 
 set -e
 
+NO_CACHE="${NO_CACHE:-false}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --no-cache)
+            NO_CACHE=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: ./build.sh [--no-cache]"
+            echo ""
+            echo "Builds llm-docker-claude-code:latest. Docker cache is used by default."
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            echo "Usage: ./build.sh [--no-cache]" >&2
+            exit 1
+            ;;
+    esac
+done
+
 echo "Building Claude Code Docker Image..."
 echo "===================================="
 echo ""
@@ -240,18 +262,27 @@ fi
 # Build Docker image with credentials
 echo ""
 echo "4. Building Docker image..."
-BUILD_ARGS="--build-arg USER_ID=${CURRENT_UID} --build-arg GROUP_ID=${CURRENT_GID}"
+BUILD_ARGS=(--build-arg "USER_ID=${CURRENT_UID}" --build-arg "GROUP_ID=${CURRENT_GID}")
 if [ -n "$BUILD_GIT_REPO_URL" ]; then
-    BUILD_ARGS="$BUILD_ARGS --build-arg GIT_REPO_URL=${BUILD_GIT_REPO_URL}"
+    BUILD_ARGS+=(--build-arg "GIT_REPO_URL=${BUILD_GIT_REPO_URL}")
     if [ -n "$BUILD_GIT_CLONE_DIR" ]; then
-        BUILD_ARGS="$BUILD_ARGS --build-arg GIT_CLONE_DIR=${BUILD_GIT_CLONE_DIR}"
+        BUILD_ARGS+=(--build-arg "GIT_CLONE_DIR=${BUILD_GIT_CLONE_DIR}")
     fi
 fi
 if [ -n "$BUILD_NPM_INSTALL_DIR" ]; then
-    BUILD_ARGS="$BUILD_ARGS --build-arg NPM_INSTALL_DIR=${BUILD_NPM_INSTALL_DIR}"
+    BUILD_ARGS+=(--build-arg "NPM_INSTALL_DIR=${BUILD_NPM_INSTALL_DIR}")
 fi
-docker build --no-cache \
-    $BUILD_ARGS \
+DOCKER_CACHE_ARGS=()
+if [ "$NO_CACHE" = true ]; then
+    DOCKER_CACHE_ARGS+=(--no-cache)
+    echo "   Docker cache: disabled"
+else
+    echo "   Docker cache: enabled"
+fi
+
+docker build \
+    "${DOCKER_CACHE_ARGS[@]}" \
+    "${BUILD_ARGS[@]}" \
     -t llm-docker-claude-code:latest .
 
 echo ""
