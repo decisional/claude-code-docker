@@ -153,6 +153,19 @@ RUN mkdir -p \
     /home/node/go/bin && \
     chown -R node:node /home/node/.cache /home/node/.claude /home/node/.codex /home/node/.azure /home/node/.config /workspace /home/node/go
 
+# Set up working directory
+WORKDIR /workspace
+
+# Install Playwright's Chromium browser into a shared, non-root path
+RUN playwright install chromium && \
+    chown -R node:node /home/node/.cache
+
+# Configure Git and set zsh as default shell for node user
+USER node
+RUN git config --global init.defaultBranch main
+USER root
+RUN chsh -s /bin/zsh node
+
 # Copy Claude Code credentials from build context
 # This file is created by build.sh from macOS Keychain
 # Run build.sh to extract credentials before building
@@ -176,19 +189,6 @@ RUN if [ -f /home/node/.azure/msal_token_cache.json ]; then \
         chmod 600 /home/node/.azure/msal_token_cache.json; \
     fi && \
     chown -R node:node /home/node/.azure
-
-# Set up working directory
-WORKDIR /workspace
-
-# Install Playwright's Chromium browser into a shared, non-root path
-RUN playwright install chromium && \
-    chown -R node:node /home/node/.cache
-
-# Configure Git and set zsh as default shell for node user
-USER node
-RUN git config --global init.defaultBranch main
-USER root
-RUN chsh -s /bin/zsh node
 
 # Pre-clone repository at build time for faster container startup (optional)
 # If GIT_REPO_URL is provided as a build arg, the repo is cloned during build
