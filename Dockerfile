@@ -124,12 +124,14 @@ USER root
 RUN npm install -g @openai/codex
 RUN npm install -g @decisional/cli
 
-# Expose package-manager shims for repos like OpenClaw that invoke pnpm directly.
+# Expose package-manager shims for repos like OpenClaw/OpenDex that invoke pnpm directly.
+ARG PNPM_VERSION=10.33.0
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 ENV COREPACK_DEFAULT_TO_LATEST=0
 RUN corepack enable && \
-    corepack prepare pnpm@10.33.0 --activate && \
-    su -s /bin/bash node -c "corepack prepare pnpm@10.33.0 --activate"
+    corepack prepare pnpm@${PNPM_VERSION} --activate && \
+    su -s /bin/bash node -c "corepack prepare pnpm@${PNPM_VERSION} --activate" && \
+    pnpm --version
 
 # Modify the existing node user to match host UID/GID
 # Handle case where GID already exists by using existing group or creating new one
