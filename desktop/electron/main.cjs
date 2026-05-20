@@ -10,9 +10,11 @@ const pty = require("node-pty");
 const MAX_TERMINAL_HISTORY_BYTES = 8 * 1024 * 1024;
 const STARTUP_INPUT_READY_MARKER = "\u001b]1337;AutodexInputReady\u0007";
 const MAX_STARTUP_INPUT_BUFFER_CHARS = 64 * 1024;
+const TEXT_REPLACEMENTS_CACHE_TTL_MS = 30_000;
 const liveSessions = new Map();
 const notificationCooldowns = new Map();
 const terminalHistory = new Map();
+let textReplacementsCache = { fetchedAt: 0, items: [] };
 // Cache PR lookups per session: sessionId -> { branch, prNumber, prUrl, state, isDraft, mergedAt, checks, checksStatus, fetchedAt }
 const prCache = new Map();
 // Minimum delay between full PR+checks refreshes for a session whose branch
@@ -388,6 +390,63 @@ function buildRuntimeEnv(overrides = {}) {
 }
 
 process.env.PATH = buildRuntimeEnv().PATH;
+
+function normalizeTextReplacementItems(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  const replacements = new Map();
+  for (const item of items) {
+    if (!item || item.on === 0 || item.on === false) {
+      continue;
+    }
+
+    const replace = typeof item.replace === "string" ? item.replace : "";
+    const withText = typeof item.with === "string" ? item.with : "";
+    if (!replace) {
+      continue;
+    }
+
+    replacements.set(replace, withText);
+  }
+
+  return [...replacements.entries()]
+    .map(([replace, withText]) => ({ replace, with: withText }))
+    .sort((a, b) => b.replace.length - a.replace.length || a.replace.localeCompare(b.replace));
+}
+
+async function readMacTextReplacements() {
+  if (process.platform !== "darwin") {
+    return [];
+  }
+
+  const plistPath = path.join(os.homedir(), "Library", "Preferences", ".GlobalPreferences.plist");
+  try {
+    const { stdout } = await runCommand("/usr/bin/plutil", [
+      "-extract",
+      "NSUserDictionaryReplacementItems",
+      "json",
+      "-o",
+      "-",
+      plistPath,
+    ], { maxBuffer: 1024 * 1024 });
+    return normalizeTextReplacementItems(JSON.parse(stdout || "[]"));
+  } catch {
+    return [];
+  }
+}
+
+async function getTextReplacements({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && now - textReplacementsCache.fetchedAt < TEXT_REPLACEMENTS_CACHE_TTL_MS) {
+    return textReplacementsCache.items;
+  }
+
+  const items = await readMacTextReplacements();
+  textReplacementsCache = { fetchedAt: now, items };
+  return items;
+}
 
 async function runCommand(filePath, args = [], options = {}) {
   return new Promise((resolve, reject) => {
@@ -1286,6 +1345,10 @@ app.on("before-quit", () => {
 ipcMain.handle("settings:get", async () => {
   await ensureStateLoaded();
   return appState.settings;
+});
+
+ipcMain.handle("text-replacements:list", async (_event, payload = {}) => {
+  return getTextReplacements({ force: Boolean(payload?.force) });
 });
 
 ipcMain.handle("settings:choose-repo-path", async () => {
