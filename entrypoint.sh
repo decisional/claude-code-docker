@@ -425,7 +425,7 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
 
     if [ "$LLM_NAME" = "codex" ]; then
         # Launch OpenAI Codex CLI
-        LLM_CMD="codex"
+        LLM_CMD="codex -c check_for_update_on_startup=false"
 
         # Codex inside the desktop app is already wrapped by tmux. Inline mode
         # preserves scrollback and avoids trapping the live composer off-screen.
@@ -433,15 +433,15 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
             LLM_CMD="$LLM_CMD --no-alt-screen"
         fi
 
-        # Add --yolo flag if enabled (full bypass mode)
+        # Add full bypass mode if enabled.
         # This disables all approval prompts and sandboxing
-        if [ "$CODEX_YOLO" = "true" ]; then
-            LLM_CMD="$LLM_CMD --yolo"
+        if [ "$CODEX_YOLO" = "true" ] || [ "$CODEX_APPROVAL_POLICY" = "yolo" ] || [ "$CODEX_APPROVAL_POLICY" = "danger-full-access" ]; then
+            LLM_CMD="$LLM_CMD --dangerously-bypass-approvals-and-sandbox"
             DANGEROUS_PROMPT_CHOICE="1"
-            echo "⚠️  Running with --yolo flag"
+            echo "⚠️  Running with --dangerously-bypass-approvals-and-sandbox flag"
             echo "    This bypasses all approval prompts and sandboxing - use only in trusted environments"
         # Or add --ask-for-approval never for just disabling prompts
-        elif [ "$CODEX_NO_APPROVAL" = "true" ]; then
+        elif [ "$CODEX_NO_APPROVAL" = "true" ] || [ "$CODEX_APPROVAL_POLICY" = "never" ]; then
             LLM_CMD="$LLM_CMD --ask-for-approval never"
             echo "⚠️  Running with --ask-for-approval never flag"
             echo "    This disables approval prompts for all operations"

@@ -140,7 +140,7 @@ CODEX_NO_APPROVAL=true
 ```
 
 **Warning:** Use these flags with extreme caution:
-- `CODEX_YOLO=true`: Enables `--yolo` flag - bypasses all approvals AND sandboxing
+- `CODEX_YOLO=true`: Enables `--dangerously-bypass-approvals-and-sandbox` - bypasses all approvals AND sandboxing
 - `CODEX_NO_APPROVAL=true`: Enables `--ask-for-approval never` - only disables approval prompts
 - Recommended only for hardened setups like Docker with no internet access
 - Use only in trusted container environments where you want full automation
