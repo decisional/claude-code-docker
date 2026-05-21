@@ -263,6 +263,13 @@ fi
 echo ""
 echo "4. Building Docker image..."
 BUILD_ARGS=(--build-arg "USER_ID=${CURRENT_UID}" --build-arg "GROUP_ID=${CURRENT_GID}")
+CODEX_CLI_VERSION=$(npm view @openai/codex version --silent 2>/dev/null || true)
+if [ -n "$CODEX_CLI_VERSION" ]; then
+    BUILD_ARGS+=(--build-arg "CODEX_CLI_VERSION=${CODEX_CLI_VERSION}")
+    echo "   Codex CLI version: ${CODEX_CLI_VERSION}"
+else
+    echo "   Codex CLI version: latest (could not resolve exact version)"
+fi
 if [ -n "$BUILD_GIT_REPO_URL" ]; then
     BUILD_ARGS+=(--build-arg "GIT_REPO_URL=${BUILD_GIT_REPO_URL}")
     if [ -n "$BUILD_GIT_CLONE_DIR" ]; then
