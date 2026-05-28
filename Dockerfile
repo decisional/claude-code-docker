@@ -116,12 +116,12 @@ ENV CYPRESS_INSTALL_BINARY=0
 
 # Install Claude Code CLI using native installer.
 # The installer downloads to ~/.claude/downloads and installs to ~/.local/bin/claude.
-# CLAUDE_CODE_VERSION defaults to "latest" but build.sh resolves it to the concrete
-# latest version string and passes it as a --build-arg. Docker keys this layer's
-# cache on that value, so the CLI is re-installed only when upstream "latest" changes
-# to a new version — not on every rebuild. Accepts a version or "stable"/"latest".
+# CLAUDE_CODE_VERSION is pinned to a concrete version; build.sh passes the same value
+# as a --build-arg. Docker keys this layer's cache on that value, so the CLI is
+# re-installed only when the pin changes — not on every rebuild. Accepts a version or
+# "stable"/"latest". Keep this default in sync with build.sh / cc-start.
 USER node
-ARG CLAUDE_CODE_VERSION=latest
+ARG CLAUDE_CODE_VERSION=2.1.154
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}"
 USER root
 

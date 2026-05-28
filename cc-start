@@ -17,6 +17,10 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
+# Pin the Claude Code CLI version installed at start time. Keep this in sync with
+# build.sh. Bump to upgrade (or set CLAUDE_CODE_VERSION=latest to track upstream).
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.154}"
+
 emit_desktop_input_ready_marker() {
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
         printf '\033]1337;AutodexInputReady\a'
@@ -50,8 +54,8 @@ update_claude_cli() {
         return 0
     fi
 
-    echo "  Updating Claude Code CLI to latest..."
-    if docker exec "$container_name" sh -lc "curl -fsSL https://claude.ai/install.sh | bash -s -- latest" >/tmp/claude-update.log 2>&1; then
+    echo "  Ensuring Claude Code CLI is at ${CLAUDE_CODE_VERSION}..."
+    if docker exec "$container_name" sh -lc "curl -fsSL https://claude.ai/install.sh | bash -s -- ${CLAUDE_CODE_VERSION}" >/tmp/claude-update.log 2>&1; then
         local claude_version
         claude_version=$(docker exec "$container_name" sh -lc "claude --version 2>/dev/null | head -n 1" 2>/dev/null || true)
         if [ -n "$claude_version" ]; then
