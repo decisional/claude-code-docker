@@ -272,6 +272,18 @@ fi
 if [ -n "$BUILD_NPM_INSTALL_DIR" ]; then
     BUILD_ARGS+=(--build-arg "NPM_INSTALL_DIR=${BUILD_NPM_INSTALL_DIR}")
 fi
+
+# Resolve the latest Claude Code CLI version and pass it as a build arg. Docker
+# keys the install layer's cache on this value, so the CLI is re-installed only
+# when upstream "latest" advances to a new version — not on every rebuild.
+CLAUDE_CODE_VERSION="$(curl -fsSL https://downloads.claude.ai/claude-code-releases/latest 2>/dev/null || true)"
+if [ -n "$CLAUDE_CODE_VERSION" ]; then
+    echo "   Claude Code CLI: ${CLAUDE_CODE_VERSION} (latest)"
+    BUILD_ARGS+=(--build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}")
+else
+    echo "   Claude Code CLI: could not resolve latest version, using installer default"
+fi
+
 DOCKER_CACHE_ARGS=()
 if [ "$NO_CACHE" = true ]; then
     DOCKER_CACHE_ARGS+=(--no-cache)
