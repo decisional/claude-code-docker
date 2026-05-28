@@ -114,10 +114,15 @@ ENV PATH="/usr/local/go/bin:${PATH}" \
 # npm install of a repo that pulls Cypress as a dev dep.
 ENV CYPRESS_INSTALL_BINARY=0
 
-# Install Claude Code CLI using native installer
-# The installer downloads to ~/.claude/downloads and installs to ~/.local/bin/claude
+# Install Claude Code CLI using native installer.
+# The installer downloads to ~/.claude/downloads and installs to ~/.local/bin/claude.
+# CLAUDE_CODE_VERSION defaults to "latest" but build.sh resolves it to the concrete
+# latest version string and passes it as a --build-arg. Docker keys this layer's
+# cache on that value, so the CLI is re-installed only when upstream "latest" changes
+# to a new version — not on every rebuild. Accepts a version or "stable"/"latest".
 USER node
-RUN curl -fsSL https://claude.ai/install.sh | bash
+ARG CLAUDE_CODE_VERSION=latest
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}"
 USER root
 
 # Install OpenAI Codex CLI globally (always use latest version)

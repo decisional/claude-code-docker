@@ -39,6 +39,32 @@ sync_opendex_key() {
     fi
 }
 
+# Keep Claude Code current whenever cc-start is used. Mirrors update_codex_cli in
+# codex-start, but uses the native installer (which installs into the node user's
+# ~/.local/bin), so it runs as the default container user rather than root.
+update_claude_cli() {
+    local container_name="$1"
+
+    if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ] && [ "${CLAUDE_AUTO_UPDATE:-}" != "true" ]; then
+        echo "  Skipping Claude Code CLI auto-update during Desktop startup"
+        return 0
+    fi
+
+    echo "  Updating Claude Code CLI to latest..."
+    if docker exec "$container_name" sh -lc "curl -fsSL https://claude.ai/install.sh | bash -s -- latest" >/tmp/claude-update.log 2>&1; then
+        local claude_version
+        claude_version=$(docker exec "$container_name" sh -lc "claude --version 2>/dev/null | head -n 1" 2>/dev/null || true)
+        if [ -n "$claude_version" ]; then
+            echo "  ✓ Claude Code CLI ready: $claude_version"
+        else
+            echo "  ✓ Claude Code CLI updated"
+        fi
+    else
+        echo "  ⚠ Could not auto-update Claude Code CLI (continuing with installed version)"
+        sed "s/^/    /" /tmp/claude-update.log | tail -n 20 || true
+    fi
+}
+
 # Parse arguments
 INSTANCE_NAME=""
 GIT_BRANCH_OVERRIDE=""
@@ -149,7 +175,10 @@ fi
 # Check if container already exists and is running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     echo "✓ Container already running"
-    
+
+    echo ""
+    update_claude_cli "$CONTAINER_NAME"
+
     # Copy Claude instructions if they exist locally
     if [ -f "$HOME/.claude/CLAUDE.md" ]; then
         echo "  Copying Claude instructions..."
@@ -252,6 +281,9 @@ else
         echo "✓ Repository ready"
         echo "  (Dependencies are installing in background)"
     fi
+
+    echo ""
+    update_claude_cli "$CONTAINER_NAME"
 
     echo ""
 
