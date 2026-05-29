@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   createSessionWithTicket: payload => ipcRenderer.invoke("sessions:create-with-ticket", payload),
   listSessions: () => ipcRenderer.invoke("sessions:list"),
   getTerminalHistory: payload => ipcRenderer.invoke("sessions:get-terminal-history", payload),
+  getTextReplacements: payload => ipcRenderer.invoke("text-replacements:list", payload),
   createSession: payload => ipcRenderer.invoke("sessions:create", payload),
   attachSession: payload => ipcRenderer.invoke("sessions:attach", payload),
   resetSession: payload => ipcRenderer.invoke("sessions:reset", payload),
