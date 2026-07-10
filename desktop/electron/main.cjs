@@ -828,7 +828,13 @@ async function startInteractiveSession(session, mode = "start", size) {
   }
 
   const repoPath = currentRepoPath();
-  const env = buildRuntimeEnv({ AUTODEX_DESKTOP_INPUT_READY_MARKER: "1" });
+  const runtimeEnv = { AUTODEX_DESKTOP_INPUT_READY_MARKER: "1" };
+  if (session.runtime === "codex") {
+    runtimeEnv.CODEX_AUTO_UPDATE = process.env.CODEX_AUTO_UPDATE || "true";
+  } else if (session.runtime === "claude") {
+    runtimeEnv.CLAUDE_AUTO_UPDATE = process.env.CLAUDE_AUTO_UPDATE || "true";
+  }
+  const env = buildRuntimeEnv(runtimeEnv);
 
   let term;
   try {

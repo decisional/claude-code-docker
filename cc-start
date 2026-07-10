@@ -10,6 +10,13 @@ set -e
 # Determine script directory early (needed for sourcing .env and finding project files)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Explicit process environment overrides (for example, values supplied by the
+# Desktop app) take precedence over the repository's .env file.
+INHERITED_CLAUDE_CODE_VERSION_SET="${CLAUDE_CODE_VERSION+x}"
+INHERITED_CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION-}"
+INHERITED_CLAUDE_AUTO_UPDATE_SET="${CLAUDE_AUTO_UPDATE+x}"
+INHERITED_CLAUDE_AUTO_UPDATE="${CLAUDE_AUTO_UPDATE-}"
+
 # Source .env to read project configuration (GIT_REPO_URL, NPM_INSTALL_DIR, etc.)
 if [ -f "$SCRIPT_DIR/.env" ]; then
     set -a
@@ -17,9 +24,19 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
+if [ "$INHERITED_CLAUDE_CODE_VERSION_SET" = "x" ]; then
+    CLAUDE_CODE_VERSION="$INHERITED_CLAUDE_CODE_VERSION"
+fi
+if [ "$INHERITED_CLAUDE_AUTO_UPDATE_SET" = "x" ]; then
+    CLAUDE_AUTO_UPDATE="$INHERITED_CLAUDE_AUTO_UPDATE"
+fi
+unset INHERITED_CLAUDE_CODE_VERSION_SET INHERITED_CLAUDE_CODE_VERSION
+unset INHERITED_CLAUDE_AUTO_UPDATE_SET INHERITED_CLAUDE_AUTO_UPDATE
+
 # Pin the Claude Code CLI version installed at start time. Keep this in sync with
 # build.sh. Bump to upgrade (or set CLAUDE_CODE_VERSION=latest to track upstream).
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.205}"
+CLAUDE_AUTO_UPDATE="${CLAUDE_AUTO_UPDATE:-true}"
 
 emit_desktop_input_ready_marker() {
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
@@ -46,26 +63,108 @@ sync_opendex_key() {
 # Keep Claude Code current whenever cc-start is used. Mirrors update_codex_cli in
 # codex-start, but uses the native installer (which installs into the node user's
 # ~/.local/bin), so it runs as the default container user rather than root.
+activate_installed_claude_version() {
+    local container_name="$1"
+    local requested_version="$2"
+
+    docker exec "$container_name" sh -lc '
+        requested_version="$1"
+        requested_binary="/home/node/.local/share/claude/versions/$requested_version"
+        [ -x "$requested_binary" ] || exit 1
+
+        actual_version=$("$requested_binary" --version 2>/dev/null | head -n 1)
+        actual_version=${actual_version%% *}
+        actual_version=${actual_version#v}
+        [ "$actual_version" = "$requested_version" ] || exit 1
+
+        ln -sfn "$requested_binary" /home/node/.local/bin/claude
+    ' sh "$requested_version" >/dev/null 2>&1
+}
+
 update_claude_cli() {
     local container_name="$1"
+    local requested_version="${CLAUDE_CODE_VERSION#v}"
+    local current_version=""
+    local installed_version=""
+    local running_version=""
+    local update_log="${TMPDIR:-/tmp}/claude-update-${container_name}.log"
+    local concrete_version="false"
 
-    if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ] && [ "${CLAUDE_AUTO_UPDATE:-}" != "true" ]; then
-        echo "  Skipping Claude Code CLI auto-update during Desktop startup"
+    current_version=$(docker exec "$container_name" sh -lc "claude --version 2>/dev/null | head -n 1" 2>/dev/null || true)
+    current_version="${current_version%% *}"
+    current_version="${current_version#v}"
+    running_version=$(docker exec "$container_name" sh -lc '
+        pane_pid=$(tmux list-panes -t llm-session -F "#{pane_pid}" 2>/dev/null | head -n 1) || exit 0
+        executable=$(readlink "/proc/$pane_pid/exe" 2>/dev/null || true)
+        case "$executable" in
+            */.local/share/claude/versions/*) basename "$executable" ;;
+        esac
+    ' 2>/dev/null || true)
+    running_version="${running_version%% *}"
+    running_version="${running_version#v}"
+
+    if [[ "$requested_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+        concrete_version="true"
+        if [ "$current_version" = "$requested_version" ]; then
+            echo "  ✓ Claude Code CLI ready: $current_version (pinned)"
+            if [ -n "$running_version" ] && [ "$running_version" != "$requested_version" ]; then
+                echo "  ⚠ Existing tmux session is still running Claude Code $running_version"
+                echo "    Stop and start this instance to launch the pinned binary."
+            fi
+            return 0
+        fi
+
+        # The native installer can leave its launcher on an older version when
+        # the requested binary is already present. Select a validated local
+        # binary directly before doing another network install.
+        if activate_installed_claude_version "$container_name" "$requested_version"; then
+            echo "  ✓ Claude Code CLI ready: $requested_version (activated existing pin)"
+            if [ -n "$running_version" ] && [ "$running_version" != "$requested_version" ]; then
+                echo "  ⚠ Existing tmux session is still running Claude Code $running_version"
+                echo "    Stop and start this instance to launch the pinned binary."
+            fi
+            return 0
+        fi
+    elif [ "$requested_version" != "latest" ] && [ "$requested_version" != "stable" ]; then
+        echo "  ⚠ Invalid CLAUDE_CODE_VERSION: $CLAUDE_CODE_VERSION"
+        echo "    Expected a concrete version, 'stable', or 'latest'; continuing with $current_version"
         return 0
     fi
 
+    if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ] && [ "${CLAUDE_AUTO_UPDATE:-}" != "true" ]; then
+        if [ "$concrete_version" = "true" ]; then
+            echo "  Pinned Claude Code CLI mismatch: have ${current_version:-none}, need $requested_version"
+            echo "  Enforcing the exact pin despite Desktop auto-update being disabled..."
+        else
+            echo "  Skipping Claude Code CLI '$requested_version' channel update during Desktop startup"
+            echo "  Current version: ${current_version:-not installed}"
+            return 0
+        fi
+    fi
+
     echo "  Ensuring Claude Code CLI is at ${CLAUDE_CODE_VERSION}..."
-    if docker exec "$container_name" sh -lc "curl -fsSL https://claude.ai/install.sh | bash -s -- ${CLAUDE_CODE_VERSION}" >/tmp/claude-update.log 2>&1; then
-        local claude_version
-        claude_version=$(docker exec "$container_name" sh -lc "claude --version 2>/dev/null | head -n 1" 2>/dev/null || true)
-        if [ -n "$claude_version" ]; then
-            echo "  ✓ Claude Code CLI ready: $claude_version"
+    if docker exec "$container_name" sh -lc 'curl -fsSL https://claude.ai/install.sh | bash -s -- "$1"' sh "$requested_version" >"$update_log" 2>&1; then
+        if [ "$concrete_version" = "true" ]; then
+            activate_installed_claude_version "$container_name" "$requested_version" || true
+        fi
+        installed_version=$(docker exec "$container_name" sh -lc "claude --version 2>/dev/null | head -n 1" 2>/dev/null || true)
+        installed_version="${installed_version%% *}"
+        installed_version="${installed_version#v}"
+        if [ "$concrete_version" = "true" ] && [ "$installed_version" != "$requested_version" ]; then
+            echo "  ⚠ Claude Code CLI pin verification failed: expected $requested_version, got ${installed_version:-unknown}"
+            sed "s/^/    /" "$update_log" | tail -n 20 || true
+        elif [ -n "$installed_version" ]; then
+            echo "  ✓ Claude Code CLI ready: $installed_version"
+            if [ -n "$running_version" ] && [ "$running_version" != "$installed_version" ]; then
+                echo "  ⚠ Existing tmux session is still running Claude Code $running_version"
+                echo "    Stop and start this instance to launch the installed binary."
+            fi
         else
             echo "  ✓ Claude Code CLI updated"
         fi
     else
         echo "  ⚠ Could not auto-update Claude Code CLI (continuing with installed version)"
-        sed "s/^/    /" /tmp/claude-update.log | tail -n 20 || true
+        sed "s/^/    /" "$update_log" | tail -n 20 || true
     fi
 }
 

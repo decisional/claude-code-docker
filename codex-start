@@ -9,12 +9,34 @@ set -e
 # Determine script directory early (needed for sourcing .env and finding project files)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Explicit process environment overrides (for example, values supplied by the
+# Desktop app) take precedence over the repository's .env file.
+INHERITED_CODEX_VERSION_SET="${CODEX_VERSION+x}"
+INHERITED_CODEX_VERSION="${CODEX_VERSION-}"
+INHERITED_CODEX_AUTO_UPDATE_SET="${CODEX_AUTO_UPDATE+x}"
+INHERITED_CODEX_AUTO_UPDATE="${CODEX_AUTO_UPDATE-}"
+
 # Source .env to read project configuration (GIT_REPO_URL, NPM_INSTALL_DIR, etc.)
 if [ -f "$SCRIPT_DIR/.env" ]; then
     set -a
     source "$SCRIPT_DIR/.env"
     set +a
 fi
+
+if [ "$INHERITED_CODEX_VERSION_SET" = "x" ]; then
+    CODEX_VERSION="$INHERITED_CODEX_VERSION"
+fi
+if [ "$INHERITED_CODEX_AUTO_UPDATE_SET" = "x" ]; then
+    CODEX_AUTO_UPDATE="$INHERITED_CODEX_AUTO_UPDATE"
+fi
+unset INHERITED_CODEX_VERSION_SET INHERITED_CODEX_VERSION
+unset INHERITED_CODEX_AUTO_UPDATE_SET INHERITED_CODEX_AUTO_UPDATE
+
+# Pin the Codex CLI version installed at start time. Keep this in sync with
+# build.sh and the Dockerfile. Bump to upgrade, or set CODEX_VERSION=latest to
+# track upstream.
+CODEX_VERSION="${CODEX_VERSION:-0.144.1}"
+CODEX_AUTO_UPDATE="${CODEX_AUTO_UPDATE:-true}"
 
 emit_desktop_input_ready_marker() {
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
@@ -41,24 +63,55 @@ sync_opendex_key() {
 # Keep Codex current whenever codex-start is used.
 update_codex_cli() {
     local container_name="$1"
+    local requested_version="${CODEX_VERSION#v}"
+    local current_version=""
+    local installed_version=""
+    local update_log="${TMPDIR:-/tmp}/codex-update-${container_name}.log"
+    local concrete_version="false"
 
-    if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ] && [ "${CODEX_AUTO_UPDATE:-}" != "true" ]; then
-        echo "  Skipping Codex CLI auto-update during Desktop startup"
+    current_version=$(docker exec "$container_name" sh -lc "codex --version 2>/dev/null | head -n 1" 2>/dev/null || true)
+    current_version="${current_version##* }"
+    current_version="${current_version#v}"
+
+    if [[ "$requested_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+        concrete_version="true"
+        if [ "$current_version" = "$requested_version" ]; then
+            echo "  ✓ Codex CLI ready: $current_version (pinned)"
+            return 0
+        fi
+    elif [ "$requested_version" != "latest" ]; then
+        echo "  ⚠ Invalid CODEX_VERSION: $CODEX_VERSION"
+        echo "    Expected a concrete version or 'latest'; continuing with ${current_version:-unknown}"
         return 0
     fi
 
-    echo "  Updating Codex CLI to latest..."
-    if docker exec -u 0 "$container_name" sh -lc "npm install -g @openai/codex@latest" >/tmp/codex-update.log 2>&1; then
-        local codex_version
-        codex_version=$(docker exec "$container_name" sh -lc "codex --version 2>/dev/null | head -n 1" 2>/dev/null || true)
-        if [ -n "$codex_version" ]; then
-            echo "  ✓ Codex CLI ready: $codex_version"
+    if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ] && [ "${CODEX_AUTO_UPDATE:-}" != "true" ]; then
+        if [ "$concrete_version" = "true" ]; then
+            echo "  Pinned Codex CLI mismatch: have ${current_version:-none}, need $requested_version"
+            echo "  Enforcing the exact pin despite Desktop auto-update being disabled..."
+        else
+            echo "  Skipping Codex CLI 'latest' channel update during Desktop startup"
+            echo "  Current version: ${current_version:-not installed}"
+            return 0
+        fi
+    fi
+
+    echo "  Ensuring Codex CLI is at ${CODEX_VERSION}..."
+    if docker exec -u 0 "$container_name" sh -lc 'npm install -g "@openai/codex@$1"' sh "$requested_version" >"$update_log" 2>&1; then
+        installed_version=$(docker exec "$container_name" sh -lc "codex --version 2>/dev/null | head -n 1" 2>/dev/null || true)
+        installed_version="${installed_version##* }"
+        installed_version="${installed_version#v}"
+        if [ "$concrete_version" = "true" ] && [ "$installed_version" != "$requested_version" ]; then
+            echo "  ⚠ Codex CLI pin verification failed: expected $requested_version, got ${installed_version:-unknown}"
+            sed "s/^/    /" "$update_log" | tail -n 20 || true
+        elif [ -n "$installed_version" ]; then
+            echo "  ✓ Codex CLI ready: $installed_version"
         else
             echo "  ✓ Codex CLI updated"
         fi
     else
         echo "  ⚠ Could not auto-update Codex CLI (continuing with installed version)"
-        sed "s/^/    /" /tmp/codex-update.log | tail -n 20 || true
+        sed "s/^/    /" "$update_log" | tail -n 20 || true
     fi
 }
 

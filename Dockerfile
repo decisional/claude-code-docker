@@ -122,11 +122,26 @@ ENV CYPRESS_INSTALL_BINARY=0
 # "stable"/"latest". Keep this default in sync with build.sh / cc-start.
 USER node
 ARG CLAUDE_CODE_VERSION=2.1.205
-RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}"
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}" && \
+    INSTALLED_CLAUDE_VERSION=$(/home/node/.local/bin/claude --version | awk '{print $1}') && \
+    case "${CLAUDE_CODE_VERSION}" in \
+        stable|latest) true ;; \
+        *) test "${INSTALLED_CLAUDE_VERSION#v}" = "${CLAUDE_CODE_VERSION#v}" ;; \
+    esac
 USER root
 
-# Install OpenAI Codex CLI globally (always use latest version)
-RUN npm install -g @openai/codex
+# Install OpenAI Codex CLI globally. CODEX_VERSION is pinned to a concrete version;
+# build.sh passes the same value as a --build-arg. Docker keys this layer's cache on
+# that value, so the CLI is re-installed only when the pin changes — not on every
+# rebuild. Accepts a version or "latest". Keep this default in sync with build.sh
+# and codex-start.
+ARG CODEX_VERSION=0.144.1
+RUN npm install -g @openai/codex@${CODEX_VERSION} && \
+    INSTALLED_CODEX_VERSION=$(codex --version | awk '{print $2}') && \
+    case "${CODEX_VERSION}" in \
+        latest) true ;; \
+        *) test "${INSTALLED_CODEX_VERSION#v}" = "${CODEX_VERSION#v}" ;; \
+    esac
 RUN npm install -g @decisional/cli
 
 # Expose package-manager shims for repos like OpenClaw/OpenDex that invoke pnpm directly.
