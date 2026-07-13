@@ -33,10 +33,18 @@ fi
 unset INHERITED_CLAUDE_CODE_VERSION_SET INHERITED_CLAUDE_CODE_VERSION
 unset INHERITED_CLAUDE_AUTO_UPDATE_SET INHERITED_CLAUDE_AUTO_UPDATE
 
-# Pin the Claude Code CLI version installed at start time. Keep this in sync with
-# build.sh. Bump to upgrade (or set CLAUDE_CODE_VERSION=latest to track upstream).
+# Use the shared daily cache when automatic updates are enabled. Set
+# CLAUDE_AUTO_UPDATE=false to keep the configured version pinned.
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.205}"
 CLAUDE_AUTO_UPDATE="${CLAUDE_AUTO_UPDATE:-true}"
+
+if [ "$CLAUDE_AUTO_UPDATE" = "true" ]; then
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/scripts/refresh-cli-version-cache.sh"
+    if valid_version "${LATEST_CLAUDE_CODE_VERSION:-}"; then
+        CLAUDE_CODE_VERSION="$LATEST_CLAUDE_CODE_VERSION"
+    fi
+fi
 
 emit_desktop_input_ready_marker() {
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
@@ -58,6 +66,67 @@ sync_opendex_key() {
     if ! install -m 600 "$source_key" "$target_key" 2>/dev/null; then
         echo "  (Could not sync openclawcodex.pem, continuing anyway...)"
     fi
+}
+
+# Claude Code on macOS keeps its OAuth session in Keychain rather than
+# ~/.claude/.credentials.json. The container mounts its own writable
+# claude-data directory, which takes precedence over the credential baked into
+# the image. Refresh that mounted credential before every start/attach so the
+# container follows the account currently signed in on the host.
+sync_claude_credentials() {
+    local credentials_dir="$SCRIPT_DIR/claude-data"
+    local credentials_file="$credentials_dir/.credentials.json"
+    local temporary_file
+    local validation_dir
+    local host_status
+    local synced_status
+    local host_email
+    local synced_email
+
+    mkdir -p "$credentials_dir"
+    temporary_file=$(mktemp "$credentials_dir/.credentials.json.tmp.XXXXXX")
+    validation_dir=$(mktemp -d "${TMPDIR:-/tmp}/claude-auth-validation.XXXXXX")
+
+    cleanup_claude_credential_sync() {
+        rm -f "$temporary_file"
+        rm -rf "$validation_dir"
+    }
+
+    if ! security find-generic-password -s "Claude Code-credentials" -w >"$temporary_file" 2>/dev/null; then
+        cleanup_claude_credential_sync
+        echo "  ⚠ Could not read the host Claude Code session from Keychain; keeping the existing container session."
+        return 0
+    fi
+
+    if ! jq -e '.claudeAiOauth | type == "object"' "$temporary_file" >/dev/null 2>&1; then
+        cleanup_claude_credential_sync
+        echo "  ⚠ Host Claude Code credentials were not valid JSON; keeping the existing container session."
+        return 0
+    fi
+
+    host_status=$(claude auth status --json 2>/dev/null || true)
+    host_email=$(jq -r 'select(.loggedIn == true) | .email // empty' <<<"$host_status" 2>/dev/null)
+    cp "$temporary_file" "$validation_dir/.credentials.json"
+    synced_status=$(CLAUDE_CONFIG_DIR="$validation_dir" claude auth status --json 2>/dev/null || true)
+    synced_email=$(jq -r 'select(.loggedIn == true) | .email // empty' <<<"$synced_status" 2>/dev/null)
+
+    if [ -z "$host_email" ]; then
+        cleanup_claude_credential_sync
+        echo "  ⚠ Host Claude Code is not logged in; keeping the existing container session."
+        return 0
+    fi
+
+    if [ -z "$synced_email" ] || [ "$synced_email" != "$host_email" ]; then
+        cleanup_claude_credential_sync
+        echo "  ⚠ Host Keychain credentials do not match the active Claude Code account ($host_email); keeping the existing container session."
+        echo "    Run 'claude auth logout && claude auth login --claudeai --email $host_email' on the host once to refresh Keychain, then starts will sync automatically."
+        return 0
+    fi
+
+    chmod 600 "$temporary_file"
+    mv -f "$temporary_file" "$credentials_file"
+    rm -rf "$validation_dir"
+    echo "  ✓ Synced Claude Code authentication from the host"
 }
 
 # Keep Claude Code current whenever cc-start is used. Mirrors update_codex_cli in
@@ -244,6 +313,12 @@ if [ -n "$PORT_OVERRIDE" ]; then
     echo "   Dev port: $PORT_OVERRIDE"
 fi
 echo ""
+
+sync_claude_credentials
+mkdir -p "$SCRIPT_DIR/cli-data/claude"
+
+# Keep the credential mount in sync even when reattaching to an already-running
+# instance. Claude reads this file when each CLI process starts.
 
 # Build extra flags for docker-compose run
 RUN_EXTRA_FLAGS=""

@@ -32,11 +32,18 @@ fi
 unset INHERITED_CODEX_VERSION_SET INHERITED_CODEX_VERSION
 unset INHERITED_CODEX_AUTO_UPDATE_SET INHERITED_CODEX_AUTO_UPDATE
 
-# Pin the Codex CLI version installed at start time. Keep this in sync with
-# build.sh and the Dockerfile. Bump to upgrade, or set CODEX_VERSION=latest to
-# track upstream.
+# Use the shared daily cache when automatic updates are enabled. Set
+# CODEX_AUTO_UPDATE=false to keep the configured version pinned.
 CODEX_VERSION="${CODEX_VERSION:-0.144.1}"
 CODEX_AUTO_UPDATE="${CODEX_AUTO_UPDATE:-true}"
+
+if [ "$CODEX_AUTO_UPDATE" = "true" ]; then
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/scripts/refresh-cli-version-cache.sh"
+    if valid_version "${LATEST_CODEX_VERSION:-}"; then
+        CODEX_VERSION="$LATEST_CODEX_VERSION"
+    fi
+fi
 
 emit_desktop_input_ready_marker() {
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
@@ -68,6 +75,7 @@ update_codex_cli() {
     local installed_version=""
     local update_log="${TMPDIR:-/tmp}/codex-update-${container_name}.log"
     local concrete_version="false"
+    local shared_codex_version=""
 
     current_version=$(docker exec "$container_name" sh -lc "codex --version 2>/dev/null | head -n 1" 2>/dev/null || true)
     current_version="${current_version##* }"
@@ -77,6 +85,14 @@ update_codex_cli() {
         concrete_version="true"
         if [ "$current_version" = "$requested_version" ]; then
             echo "  ✓ Codex CLI ready: $current_version (pinned)"
+            return 0
+        fi
+        shared_codex_version=$(docker exec "$container_name" sh -lc '/opt/codex/node_modules/.bin/codex --version 2>/dev/null | head -n 1' 2>/dev/null || true)
+        shared_codex_version="${shared_codex_version##* }"
+        shared_codex_version="${shared_codex_version#v}"
+        if [ "$shared_codex_version" = "$requested_version" ]; then
+            docker exec -u 0 "$container_name" ln -sfn /opt/codex/node_modules/.bin/codex /usr/local/bin/codex
+            echo "  ✓ Codex CLI ready: $shared_codex_version (shared cache)"
             return 0
         fi
     elif [ "$requested_version" != "latest" ]; then
@@ -97,7 +113,7 @@ update_codex_cli() {
     fi
 
     echo "  Ensuring Codex CLI is at ${CODEX_VERSION}..."
-    if docker exec -u 0 "$container_name" sh -lc 'npm install -g "@openai/codex@$1"' sh "$requested_version" >"$update_log" 2>&1; then
+    if docker exec -u 0 "$container_name" sh -lc 'npm install --prefix /opt/codex "@openai/codex@$1" && ln -sfn /opt/codex/node_modules/.bin/codex /usr/local/bin/codex' sh "$requested_version" >"$update_log" 2>&1; then
         installed_version=$(docker exec "$container_name" sh -lc "codex --version 2>/dev/null | head -n 1" 2>/dev/null || true)
         installed_version="${installed_version##* }"
         installed_version="${installed_version#v}"
@@ -177,6 +193,8 @@ echo "🚀 Starting Codex CLI instance: $INSTANCE_NAME"
 echo "   Project: $PROJECT_NAME"
 echo "   Repo: $REPO_OVERRIDE"
 echo ""
+
+mkdir -p "$SCRIPT_DIR/cli-data/codex"
 
 # Sync Codex credentials from host to codex-data (mounted into container)
 if [ -f "$HOME/.codex/auth.json" ]; then

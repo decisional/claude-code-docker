@@ -11,6 +11,8 @@ git-data/
 !.claude/settings.json
 !.claude/refine.json
 workflow-data/
+runtime-data/
+cli-data/
 AGENTS.md
 
 # Environment and build files
