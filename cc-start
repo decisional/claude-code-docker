@@ -77,19 +77,12 @@ sync_claude_credentials() {
     local credentials_dir="$SCRIPT_DIR/claude-data"
     local credentials_file="$credentials_dir/.credentials.json"
     local temporary_file
-    local validation_dir
-    local host_status
-    local synced_status
-    local host_email
-    local synced_email
 
     mkdir -p "$credentials_dir"
     temporary_file=$(mktemp "$credentials_dir/.credentials.json.tmp.XXXXXX")
-    validation_dir=$(mktemp -d "${TMPDIR:-/tmp}/claude-auth-validation.XXXXXX")
 
     cleanup_claude_credential_sync() {
         rm -f "$temporary_file"
-        rm -rf "$validation_dir"
     }
 
     if ! security find-generic-password -s "Claude Code-credentials" -w >"$temporary_file" 2>/dev/null; then
@@ -104,28 +97,8 @@ sync_claude_credentials() {
         return 0
     fi
 
-    host_status=$(claude auth status --json 2>/dev/null || true)
-    host_email=$(jq -r 'select(.loggedIn == true) | .email // empty' <<<"$host_status" 2>/dev/null)
-    cp "$temporary_file" "$validation_dir/.credentials.json"
-    synced_status=$(CLAUDE_CONFIG_DIR="$validation_dir" claude auth status --json 2>/dev/null || true)
-    synced_email=$(jq -r 'select(.loggedIn == true) | .email // empty' <<<"$synced_status" 2>/dev/null)
-
-    if [ -z "$host_email" ]; then
-        cleanup_claude_credential_sync
-        echo "  ⚠ Host Claude Code is not logged in; keeping the existing container session."
-        return 0
-    fi
-
-    if [ -z "$synced_email" ] || [ "$synced_email" != "$host_email" ]; then
-        cleanup_claude_credential_sync
-        echo "  ⚠ Host Keychain credentials do not match the active Claude Code account ($host_email); keeping the existing container session."
-        echo "    Run 'claude auth logout && claude auth login --claudeai --email $host_email' on the host once to refresh Keychain, then starts will sync automatically."
-        return 0
-    fi
-
     chmod 600 "$temporary_file"
     mv -f "$temporary_file" "$credentials_file"
-    rm -rf "$validation_dir"
     echo "  ✓ Synced Claude Code authentication from the host"
 }
 
