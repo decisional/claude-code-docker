@@ -273,13 +273,19 @@ if [ -n "$BUILD_NPM_INSTALL_DIR" ]; then
     BUILD_ARGS+=(--build-arg "NPM_INSTALL_DIR=${BUILD_NPM_INSTALL_DIR}")
 fi
 
-# Pin the Claude Code CLI to a specific version and pass it as a build arg. Docker
-# keys the install layer's cache on this value, so the CLI is re-installed only when
-# this pin changes — not on every rebuild. Bump CLAUDE_CODE_VERSION to upgrade (or
-# set it to "latest" to track upstream). Keep this in sync with cc-start.
-CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.205}"
-echo "   Claude Code CLI: ${CLAUDE_CODE_VERSION} (pinned)"
-BUILD_ARGS+=(--build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}")
+# The Claude Code CLI is not baked into the image: the shared cli-data/claude
+# cache mounts over the installer's version store, so a baked copy could never
+# run. cc-start installs the pinned version into that cache on first start, so
+# CLAUDE_CODE_VERSION is a runtime pin only (cc-start / .env) and is not a build
+# arg. See the Dockerfile for the full reasoning.
+echo "   Claude Code CLI: installed by cc-start (not baked into the image)"
+
+# Pin the Codex CLI. Bump CODEX_VERSION to upgrade (or set it to
+# "latest" to track upstream). Keep this default in sync with the Dockerfile
+# and codex-start.
+CODEX_VERSION="${CODEX_VERSION:-0.144.1}"
+echo "   Codex CLI: ${CODEX_VERSION} (pinned)"
+BUILD_ARGS+=(--build-arg "CODEX_VERSION=${CODEX_VERSION}")
 
 DOCKER_CACHE_ARGS=()
 if [ "$NO_CACHE" = true ]; then

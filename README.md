@@ -341,9 +341,9 @@ docker run -it --rm \
 
 ## Features
 
-- Node.js 20
-- Claude Code CLI (native installer - auto-updates enabled)
-- OpenAI Codex CLI (latest version)
+- Node.js 22.14.0
+- Claude Code CLI (native installer, pinned in `cc-start`, installed on first start into a cache shared by every container)
+- OpenAI Codex CLI (pinned version, baked into the image)
 - Python 3 with pip, venv, Poetry, and common packages (psycopg2-binary, requests)
 - Go 1.23.5
 - Git
@@ -478,26 +478,32 @@ RUN npm install -g pg
 
 ### Updating Claude Code to a newer version
 
-The Docker image uses the native Claude Code installer which supports auto-updates. To manually update:
+Claude Code is not baked into the image — the shared `cli-data/claude` cache
+mounts over the installer's version store, so a baked copy could never run.
+`cc-start` is the single source of truth for the pin, and it installs the
+requested version into that shared cache when no container already matches.
+Because the cache is shared, that download happens once per machine rather than
+once per container.
 
 ```bash
-# 1. Inside a running container
-docker exec -it <container-name> bash
-claude install
+# 1. Update CLAUDE_CODE_VERSION in cc-start (and .env, if you set it there)
 
-# 2. Or rebuild the Docker image to get the latest version
-./build.sh
-
-# 3. Restart your containers with the new image
+# 2. Stop and start an existing instance so its running Claude process changes
 ./cc-stop <instance-name>
 ./cc-start <instance-name>
 ```
 
-**Native installer benefits:**
-- Auto-updates enabled by default
-- Official installation method recommended by Anthropic
-- More stable than npm-based installation
-- No Node.js version conflicts
+No rebuild is needed to change the Claude version. `cc-start` uses the existing
+local `llm-docker-claude-code:latest` tag, and a runtime install writes to the
+shared cache. Also, changing the `claude` symlink does not replace a Claude
+process that is already running inside tmux; stop/start the instance to launch
+the newly installed binary.
+
+`CLAUDE_CODE_VERSION` in `.env` overrides the checked-in runtime pin. Use a
+concrete version for deterministic startup, or `stable`/`latest` only when you
+intentionally want a moving channel. `CLAUDE_AUTO_UPDATE=false` may skip moving
+channel checks during Desktop startup, but an exact-version mismatch is still
+repaired before launch.
 
 ### Error: "not a directory" when mounting .gitconfig
 

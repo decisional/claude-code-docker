@@ -37,6 +37,10 @@ services:
       - ./claude-data:/home/node/.claude
       # Mount Codex credentials with write access (for sessions and settings)
       - ./codex-data:/home/node/.codex
+      # Share installed CLI versions across containers. The launch scripts update
+      # these directories once, then new containers activate the cached version.
+      - ./cli-data/claude:/home/node/.local/share/claude
+      - ./cli-data/codex:/opt/codex
       # Mount Azure CLI credentials with write access (so `az login` persists)
       - ./azure-data:/home/node/.azure
       # Share skills/commands with each CLI home
