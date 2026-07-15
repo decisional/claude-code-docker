@@ -46,5 +46,7 @@ check_pin() {
     echo "✓ $display_name version pin: $docker_version"
 }
 
-check_pin "Claude Code CLI" "CLAUDE_CODE_VERSION" "cc-start"
+# Claude Code has no pin to cross-check: it is not baked into the image, so
+# cc-start is the single source of truth (optionally overridden by .env). Only
+# Codex is pinned in more than one place and can therefore drift.
 check_pin "Codex CLI" "CODEX_VERSION" "codex-start"

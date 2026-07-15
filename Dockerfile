@@ -114,21 +114,16 @@ ENV PATH="/usr/local/go/bin:${PATH}" \
 # npm install of a repo that pulls Cypress as a dev dep.
 ENV CYPRESS_INSTALL_BINARY=0
 
-# Install Claude Code CLI using native installer.
-# The installer downloads to ~/.claude/downloads and installs to ~/.local/bin/claude.
-# CLAUDE_CODE_VERSION is pinned to a concrete version; build.sh passes the same value
-# as a --build-arg. Docker keys this layer's cache on that value, so the CLI is
-# re-installed only when the pin changes — not on every rebuild. Accepts a version or
-# "stable"/"latest". Keep this default in sync with build.sh / cc-start.
-USER node
-ARG CLAUDE_CODE_VERSION=2.1.205
-RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}" && \
-    INSTALLED_CLAUDE_VERSION=$(/home/node/.local/bin/claude --version | awk '{print $1}') && \
-    case "${CLAUDE_CODE_VERSION}" in \
-        stable|latest) true ;; \
-        *) test "${INSTALLED_CLAUDE_VERSION#v}" = "${CLAUDE_CODE_VERSION#v}" ;; \
-    esac
-USER root
+# Claude Code CLI is deliberately not installed here. The native installer's
+# version store is ~/.local/share/claude, and docker-compose mounts the shared
+# cli-data/claude cache over exactly that path so an install from any container
+# is reused by the others. A bind mount never inherits image content, so anything
+# installed here would be hidden at runtime — the image would ship a CLI that can
+# never execute. cc-start owns installing the pinned version into that shared
+# cache instead; see CLAUDE_CODE_VERSION in cc-start.
+#
+# Codex below is unaffected: it installs to /usr/local/lib and its shared cache
+# mounts at a separate path (/opt/codex), so nothing is shadowed.
 
 # Install OpenAI Codex CLI globally. CODEX_VERSION is pinned to a concrete version;
 # build.sh passes the same value as a --build-arg. Docker keys this layer's cache on
@@ -164,16 +159,21 @@ RUN if getent group ${GROUP_ID} > /dev/null 2>&1; then \
     fi && \
     chown -R ${USER_ID}:${GROUP_ID} /home/node
 
-# Create directories and set permissions
+# Create directories and set permissions.
+# .local/bin must exist even though nothing installs into it at build time: the
+# launch scripts symlink the shared cache's Claude binary into it, and `ln` fails
+# on a missing directory. It also gates PATH — /home/node/.profile only prepends
+# .local/bin when the directory exists, and the launch scripts use login shells.
 RUN mkdir -p \
     /home/node/.cache/ms-playwright \
     /home/node/.claude \
     /home/node/.codex \
     /home/node/.azure \
     /home/node/.config \
+    /home/node/.local/bin \
     /workspace \
     /home/node/go/bin && \
-    chown -R node:node /home/node/.cache /home/node/.claude /home/node/.codex /home/node/.azure /home/node/.config /workspace /home/node/go
+    chown -R node:node /home/node/.cache /home/node/.claude /home/node/.codex /home/node/.azure /home/node/.config /home/node/.local /workspace /home/node/go
 
 # Set up working directory
 WORKDIR /workspace

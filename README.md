@@ -342,8 +342,8 @@ docker run -it --rm \
 ## Features
 
 - Node.js 22.14.0
-- Claude Code CLI (native installer with an exact checked-in version pin)
-- OpenAI Codex CLI (pinned version)
+- Claude Code CLI (native installer, pinned in `cc-start`, installed on first start into a cache shared by every container)
+- OpenAI Codex CLI (pinned version, baked into the image)
 - Python 3 with pip, venv, Poetry, and common packages (psycopg2-binary, requests)
 - Go 1.23.5
 - Git
@@ -478,27 +478,26 @@ RUN npm install -g pg
 
 ### Updating Claude Code to a newer version
 
-Claude Code is pinned in `Dockerfile`, `build.sh`, and `cc-start`. Keep those
-three values identical when upgrading. `cc-start` checks an exact pin before it
-launches a new Claude process and installs the requested version only when the
-container does not already match.
+Claude Code is not baked into the image — the shared `cli-data/claude` cache
+mounts over the installer's version store, so a baked copy could never run.
+`cc-start` is the single source of truth for the pin, and it installs the
+requested version into that shared cache when no container already matches.
+Because the cache is shared, that download happens once per machine rather than
+once per container.
 
 ```bash
-# 1. Update CLAUDE_CODE_VERSION in Dockerfile, build.sh, and cc-start
+# 1. Update CLAUDE_CODE_VERSION in cc-start (and .env, if you set it there)
 
-# 2. Rebuild the image so every new container starts at the new pin
-./build.sh
-
-# 3. Stop and start an existing instance so its running Claude process changes
+# 2. Stop and start an existing instance so its running Claude process changes
 ./cc-stop <instance-name>
 ./cc-start <instance-name>
 ```
 
-Creating a container does not rebuild the image: `cc-start` uses the existing
-local `llm-docker-claude-code:latest` tag. A runtime install changes only that
-one container's writable layer. Also, changing the `claude` symlink does not
-replace a Claude process that is already running inside tmux; stop/start the
-instance to launch the newly installed binary.
+No rebuild is needed to change the Claude version. `cc-start` uses the existing
+local `llm-docker-claude-code:latest` tag, and a runtime install writes to the
+shared cache. Also, changing the `claude` symlink does not replace a Claude
+process that is already running inside tmux; stop/start the instance to launch
+the newly installed binary.
 
 `CLAUDE_CODE_VERSION` in `.env` overrides the checked-in runtime pin. Use a
 concrete version for deterministic startup, or `stable`/`latest` only when you

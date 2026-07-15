@@ -35,7 +35,7 @@ unset INHERITED_CLAUDE_AUTO_UPDATE_SET INHERITED_CLAUDE_AUTO_UPDATE
 
 # Use the shared daily cache when automatic updates are enabled. Set
 # CLAUDE_AUTO_UPDATE=false to keep the configured version pinned.
-CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.205}"
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.209}"
 CLAUDE_AUTO_UPDATE="${CLAUDE_AUTO_UPDATE:-true}"
 
 if [ "$CLAUDE_AUTO_UPDATE" = "true" ]; then
