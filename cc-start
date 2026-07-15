@@ -107,14 +107,23 @@ sync_claude_credentials() {
     # by `claude auth status` in ~/.claude.json. Preserve the container's other
     # settings but replace this cached profile so it cannot display a stale
     # account from an earlier container login.
+    #
+    # hasCompletedOnboarding travels with the profile: Claude clears it when the
+    # signed-in account changes, and an unset flag sends the interactive CLI into
+    # the first-run wizard (which reads as a login prompt) even though the synced
+    # token is valid. Track the host's flag so a container cannot get stranded
+    # there.
     if [ -f "$host_profile_file" ] && jq -e '.oauthAccount | type == "object"' "$host_profile_file" >/dev/null 2>&1; then
         temporary_profile_file=$(mktemp "$credentials_dir/.claude.json.tmp.XXXXXX")
         if [ -f "$container_profile_file" ]; then
             jq --slurpfile host_profile "$host_profile_file" \
-                '.oauthAccount = $host_profile[0].oauthAccount' \
+                '.oauthAccount = $host_profile[0].oauthAccount
+                 | .hasCompletedOnboarding = ($host_profile[0].hasCompletedOnboarding // false)' \
                 "$container_profile_file" >"$temporary_profile_file" 2>/dev/null || true
         else
-            jq '{oauthAccount: .oauthAccount}' "$host_profile_file" >"$temporary_profile_file" 2>/dev/null || true
+            jq '{oauthAccount: .oauthAccount,
+                 hasCompletedOnboarding: (.hasCompletedOnboarding // false)}' \
+                "$host_profile_file" >"$temporary_profile_file" 2>/dev/null || true
         fi
         if jq -e '.oauthAccount | type == "object"' "$temporary_profile_file" >/dev/null 2>&1; then
             chmod 600 "$temporary_profile_file"
