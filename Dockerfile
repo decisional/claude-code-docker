@@ -121,7 +121,7 @@ ENV CYPRESS_INSTALL_BINARY=0
 # re-installed only when the pin changes — not on every rebuild. Accepts a version or
 # "stable"/"latest". Keep this default in sync with build.sh / cc-start.
 USER node
-ARG CLAUDE_CODE_VERSION=2.1.205
+ARG CLAUDE_CODE_VERSION=2.1.219
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}"
 USER root
 

@@ -277,7 +277,7 @@ fi
 # keys the install layer's cache on this value, so the CLI is re-installed only when
 # this pin changes — not on every rebuild. Bump CLAUDE_CODE_VERSION to upgrade (or
 # set it to "latest" to track upstream). Keep this in sync with cc-start.
-CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.205}"
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.219}"
 echo "   Claude Code CLI: ${CLAUDE_CODE_VERSION} (pinned)"
 BUILD_ARGS+=(--build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}")
 

@@ -19,7 +19,7 @@ fi
 
 # Pin the Claude Code CLI version installed at start time. Keep this in sync with
 # build.sh. Bump to upgrade (or set CLAUDE_CODE_VERSION=latest to track upstream).
-CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.205}"
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.219}"
 
 emit_desktop_input_ready_marker() {
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
