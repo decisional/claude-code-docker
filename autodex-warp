@@ -1,0 +1,412 @@
+#!/bin/bash
+# Open Autodex Docker sessions in Warp as tabs, not split panes.
+#
+# This intentionally does not use tmux. A session is attached through docker exec
+# and stays alive for the normal lifetime of that Warp terminal tab.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_LAUNCH_CONFIG_DIR="$HOME/.warp/launch_configurations"
+LAUNCH_CONFIG_DIR="${WARP_LAUNCH_CONFIG_DIR:-$DEFAULT_LAUNCH_CONFIG_DIR}"
+LAUNCH_CONFIG_NAME="${AUTODEX_WARP_CONFIG_NAME:-autodex-tabs}"
+LAUNCH_CONFIG_FILE="$LAUNCH_CONFIG_DIR/$LAUNCH_CONFIG_NAME.yaml"
+
+usage() {
+    cat <<USAGE
+Usage:
+  ./autodex-warp list
+  ./autodex-warp attach claude|codex NAME
+  ./autodex-warp start claude|codex NAME [--branch BRANCH] [--repo autodex|opendex] [--port PORT]
+  ./autodex-warp config [--all] [--output PATH]
+  ./autodex-warp open [--all] [--no-open]
+  ./autodex-warp open claude|codex NAME [--branch BRANCH] [--repo autodex|opendex] [--port PORT] [--no-open]
+  ./autodex-warp vertical-tabs-settings
+
+Notes:
+  - Sessions open as Warp tabs in one launch config, not split panes.
+  - This flow does not pass --tmux. Closing the Warp tab closes the attached CLI.
+  - By default, "open" includes running Docker sessions. Use --all to include stopped sessions too.
+  - To get a left tab sidebar in Warp, enable Warp's vertical tabs settings.
+USAGE
+}
+
+die() {
+    echo "autodex-warp: $*" >&2
+    exit 1
+}
+
+require_docker() {
+    command -v docker >/dev/null 2>&1 || die "docker is required"
+}
+
+yaml_quote() {
+    printf "'%s'" "$(printf "%s" "$1" | sed "s/'/''/g")"
+}
+
+shell_quote() {
+    printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
+}
+
+validate_runtime() {
+    case "${1:-}" in
+        claude|codex) ;;
+        *) die "runtime must be claude or codex" ;;
+    esac
+}
+
+container_name() {
+    local runtime="$1"
+    local name="$2"
+    printf "%s-%s-claude-code-1" "$runtime" "$name"
+}
+
+session_name_from_container() {
+    local runtime="$1"
+    local container="$2"
+    local prefix="${runtime}-"
+    local suffix="-claude-code-1"
+    local name="${container#"$prefix"}"
+    name="${name%"$suffix"}"
+    printf "%s" "$name"
+}
+
+is_autodex_container() {
+    local name="$1"
+    [[ "$name" == claude-*-claude-code-1 || "$name" == codex-*-claude-code-1 ]]
+}
+
+runtime_from_container() {
+    local name="$1"
+    case "$name" in
+        claude-*-claude-code-1) printf "claude" ;;
+        codex-*-claude-code-1) printf "codex" ;;
+        *) return 1 ;;
+    esac
+}
+
+list_sessions() {
+    local include_all="${1:-false}"
+    require_docker
+
+    local docker_args=(ps --format "{{.Names}}\t{{.State}}\t{{.Status}}")
+    if [ "$include_all" = "true" ]; then
+        docker_args=(ps -a --format "{{.Names}}\t{{.State}}\t{{.Status}}")
+    fi
+
+    docker "${docker_args[@]}" | while IFS=$'\t' read -r container state status; do
+        [ -n "$container" ] || continue
+        is_autodex_container "$container" || continue
+
+        local runtime
+        runtime="$(runtime_from_container "$container")"
+        local name
+        name="$(session_name_from_container "$runtime" "$container")"
+        printf "%s\t%s\t%s\t%s\t%s\n" "$runtime" "$name" "$container" "$state" "$status"
+    done
+}
+
+print_sessions() {
+    local include_all="$1"
+    local rows
+    rows="$(list_sessions "$include_all")"
+
+    if [ -z "$rows" ]; then
+        echo "No Autodex Docker sessions found."
+        return 0
+    fi
+
+    printf "%-8s %-28s %-40s %-10s %s\n" "Runtime" "Name" "Container" "State" "Status"
+    printf "%-8s %-28s %-40s %-10s %s\n" "-------" "----" "---------" "-----" "------"
+    printf "%s\n" "$rows" | while IFS=$'\t' read -r runtime name container state status; do
+        printf "%-8s %-28s %-40s %-10s %s\n" "$runtime" "$name" "$container" "$state" "$status"
+    done
+}
+
+attach_session() {
+    local runtime="$1"
+    local name="$2"
+    validate_runtime "$runtime"
+    require_docker
+
+    local container
+    container="$(container_name "$runtime" "$name")"
+
+    if ! docker ps -aq -f "name=^${container}$" | grep -q .; then
+        die "no container found for $runtime/$name. Create it with: ./autodex-warp start $runtime $(shell_quote "$name")"
+    fi
+
+    if ! docker ps -q -f "name=^${container}$" | grep -q .; then
+        echo "Starting stopped container: $container"
+        docker start "$container" >/dev/null
+    fi
+
+    echo "Attaching $runtime/$name without tmux..."
+    case "$runtime" in
+        claude)
+            exec docker exec -it "$container" /entrypoint.sh claude
+            ;;
+        codex)
+            exec docker exec -e LLM_TYPE=codex -it "$container" /entrypoint.sh codex
+            ;;
+    esac
+}
+
+start_session() {
+    local runtime="$1"
+    shift
+    validate_runtime "$runtime"
+
+    local name="${1:-}"
+    [ -n "$name" ] || die "session name is required"
+    shift
+
+    local args=("$name")
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --branch|--repo)
+                [ -n "${2:-}" ] || die "$1 requires a value"
+                args+=("$1" "$2")
+                shift 2
+                ;;
+            --port)
+                if [[ -n "${2:-}" && "$2" != --* ]]; then
+                    args+=("$1" "$2")
+                    shift 2
+                else
+                    args+=("$1")
+                    shift
+                fi
+                ;;
+            --tmux)
+                die "autodex-warp is the no-tmux flow; omit --tmux"
+                ;;
+            *)
+                die "unknown start option: $1"
+                ;;
+        esac
+    done
+
+    cd "$SCRIPT_DIR"
+    case "$runtime" in
+        claude) exec "$SCRIPT_DIR/cc-start" "${args[@]}" ;;
+        codex) exec "$SCRIPT_DIR/codex-start" "${args[@]}" ;;
+    esac
+}
+
+command_for_session() {
+    local mode="$1"
+    local runtime="$2"
+    local name="$3"
+    shift 3
+
+    local parts=("./autodex-warp" "$mode" "$runtime" "$name")
+    while [[ $# -gt 0 ]]; do
+        parts+=("$1")
+        shift
+    done
+
+    local rendered=""
+    local part
+    for part in "${parts[@]}"; do
+        if [ -n "$rendered" ]; then
+            rendered+=" "
+        fi
+        rendered+="$(shell_quote "$part")"
+    done
+    printf "%s" "$rendered"
+}
+
+write_launch_config_header() {
+    local output="$1"
+    {
+        echo "# Generated by autodex-warp. Edit the script, not this file."
+        printf "name: %s\n" "$(yaml_quote "$LAUNCH_CONFIG_NAME")"
+        echo "windows:"
+        echo "  - tabs:"
+    } > "$output"
+}
+
+append_tab() {
+    local output="$1"
+    local runtime="$2"
+    local name="$3"
+    local command="$4"
+    local color="blue"
+
+    if [ "$runtime" = "claude" ]; then
+        color="green"
+    fi
+
+    {
+        printf "      - title: %s\n" "$(yaml_quote "$runtime/$name")"
+        printf "        color: %s\n" "$(yaml_quote "$color")"
+        echo "        layout:"
+        printf "          cwd: %s\n" "$(yaml_quote "$SCRIPT_DIR")"
+        echo "          commands:"
+        printf "            - exec: %s\n" "$(yaml_quote "$command")"
+    } >> "$output"
+}
+
+generate_existing_sessions_config() {
+    local include_all="$1"
+    local output="$2"
+    local rows
+    rows="$(list_sessions "$include_all")"
+
+    if [ -z "$rows" ]; then
+        die "no Autodex Docker sessions found"
+    fi
+
+    mkdir -p "$(dirname "$output")"
+    write_launch_config_header "$output"
+
+    printf "%s\n" "$rows" | while IFS=$'\t' read -r runtime name _container _state _status; do
+        append_tab "$output" "$runtime" "$name" "$(command_for_session attach "$runtime" "$name")"
+    done
+
+    echo "$output"
+}
+
+generate_single_session_config() {
+    local runtime="$1"
+    local name="$2"
+    shift 2
+
+    mkdir -p "$(dirname "$LAUNCH_CONFIG_FILE")"
+    write_launch_config_header "$LAUNCH_CONFIG_FILE"
+    append_tab "$LAUNCH_CONFIG_FILE" "$runtime" "$name" "$(command_for_session start "$runtime" "$name" "$@")"
+    echo "$LAUNCH_CONFIG_FILE"
+}
+
+open_url() {
+    local url="$1"
+    if command -v open >/dev/null 2>&1; then
+        open "$url"
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url" >/dev/null 2>&1 &
+    else
+        echo "Open this URL in Warp:"
+        echo "$url"
+    fi
+}
+
+open_launch_config() {
+    if [ "${AUTODEX_WARP_NO_OPEN:-false}" = "true" ]; then
+        echo "Warp URL: warp://launch/${LAUNCH_CONFIG_NAME}.yaml"
+        return 0
+    fi
+    open_url "warp://launch/${LAUNCH_CONFIG_NAME}.yaml"
+}
+
+print_vertical_tabs_settings() {
+    cat <<SETTINGS
+Add this to Warp's settings file, then restart/reload Warp:
+
+  ~/.warp/settings.toml
+
+[appearance.vertical_tabs]
+enabled = true
+display_granularity = "tabs"
+view_mode = "expanded"
+show_panel_in_restored_windows = true
+
+Then toggle the Tabs Panel with Cmd+Shift+B if it is not already open.
+That panel is different from the agent conversation/history panel.
+SETTINGS
+}
+
+cmd="${1:-}"
+if [ -z "$cmd" ]; then
+    usage
+    exit 0
+fi
+shift
+
+case "$cmd" in
+    help|-h|--help)
+        usage
+        ;;
+    list)
+        include_all="true"
+        print_sessions "$include_all"
+        ;;
+    attach)
+        attach_session "${1:-}" "${2:-}"
+        ;;
+    start)
+        runtime="${1:-}"
+        [ -n "$runtime" ] || die "runtime is required"
+        shift
+        start_session "$runtime" "$@"
+        ;;
+    config)
+        include_all="false"
+        output="$LAUNCH_CONFIG_FILE"
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --all)
+                    include_all="true"
+                    shift
+                    ;;
+                --output)
+                    [ -n "${2:-}" ] || die "--output requires a path"
+                    output="$2"
+                    shift 2
+                    ;;
+                *)
+                    die "unknown config option: $1"
+                    ;;
+            esac
+        done
+        generated="$(generate_existing_sessions_config "$include_all" "$output")"
+        echo "Wrote Warp launch config: $generated"
+        ;;
+    vertical-tabs-settings)
+        print_vertical_tabs_settings
+        ;;
+    open)
+        include_all="false"
+        should_open="true"
+        while [[ "${1:-}" == "--all" || "${1:-}" == "--no-open" ]]; do
+            case "$1" in
+                --all) include_all="true" ;;
+                --no-open) should_open="false" ;;
+            esac
+            shift
+        done
+
+        if [[ "${1:-}" == "claude" || "${1:-}" == "codex" ]]; then
+            runtime="$1"
+            name="${2:-}"
+            [ -n "$name" ] || die "session name is required"
+            shift 2
+            remaining_args=()
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --no-open)
+                        should_open="false"
+                        shift
+                        ;;
+                    *)
+                        remaining_args+=("$1")
+                        shift
+                        ;;
+                esac
+            done
+            generated="$(generate_single_session_config "$runtime" "$name" "${remaining_args[@]}")"
+        else
+            generated="$(generate_existing_sessions_config "$include_all" "$LAUNCH_CONFIG_FILE")"
+        fi
+
+        echo "Wrote Warp launch config: $generated"
+        if [ "$should_open" = "true" ]; then
+            open_launch_config
+        else
+            echo "Warp URL: warp://launch/${LAUNCH_CONFIG_NAME}.yaml"
+        fi
+        ;;
+    *)
+        die "unknown command: $cmd"
+        ;;
+esac
