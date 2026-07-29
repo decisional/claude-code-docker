@@ -38,17 +38,63 @@ sync_opendex_key() {
     fi
 }
 
-# Keep Codex current whenever codex-start is used.
+is_semver() {
+    [[ "${1:-}" =~ ^[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z._-]+)?$ ]]
+}
+
+detect_host_codex_version() {
+    local version=""
+
+    if command -v npm >/dev/null 2>&1; then
+        version=$(npm list -g @openai/codex --depth=0 2>/dev/null | sed -n 's/.*@openai\/codex@\([^[:space:]]*\).*/\1/p' | head -n 1)
+    fi
+
+    if ! is_semver "$version" && command -v codex >/dev/null 2>&1; then
+        version=$(codex --version 2>/dev/null | awk '{print $NF; exit}' | sed 's/^v//')
+    fi
+
+    if is_semver "$version"; then
+        printf '%s' "$version"
+    fi
+}
+
+# Keep Codex current whenever codex-start creates or starts a Codex process.
 update_codex_cli() {
     local container_name="$1"
 
-    if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ] && [ "${CODEX_AUTO_UPDATE:-}" != "true" ]; then
-        echo "  Skipping Codex CLI auto-update during Desktop startup"
+    case "${CODEX_AUTO_UPDATE:-true}" in
+        false|FALSE|0|no|NO)
+            echo "  Skipping Codex CLI auto-update (CODEX_AUTO_UPDATE=${CODEX_AUTO_UPDATE})"
+            return 0
+            ;;
+    esac
+
+    if docker exec "$container_name" tmux has-session -t llm-session 2>/dev/null; then
+        echo "  Skipping Codex CLI auto-update; existing tmux session is running"
         return 0
     fi
 
-    echo "  Updating Codex CLI to latest..."
-    if docker exec -u 0 "$container_name" sh -lc "npm install -g @openai/codex@latest" >/tmp/codex-update.log 2>&1; then
+    local host_version
+    local package_spec="@openai/codex@latest"
+    host_version=$(detect_host_codex_version)
+    if [ -n "$host_version" ]; then
+        package_spec="@openai/codex@$host_version"
+    fi
+
+    local timeout_seconds="${CODEX_AUTO_UPDATE_TIMEOUT_SECONDS:-90}"
+    if ! [[ "$timeout_seconds" =~ ^[0-9]+$ ]] || [ "$timeout_seconds" -lt 1 ]; then
+        timeout_seconds=90
+    fi
+
+    local update_log="/tmp/codex-update.log"
+    echo "  Updating Codex CLI (${package_spec}, timeout ${timeout_seconds}s)..."
+    if docker exec \
+        -u 0 \
+        -e npm_config_update_notifier=false \
+        -e npm_config_fund=false \
+        -e npm_config_audit=false \
+        "$container_name" \
+        timeout "${timeout_seconds}s" npm install -g "$package_spec" --no-fund --no-audit --loglevel=warn >"$update_log" 2>&1; then
         local codex_version
         codex_version=$(docker exec "$container_name" sh -lc "codex --version 2>/dev/null | head -n 1" 2>/dev/null || true)
         if [ -n "$codex_version" ]; then
@@ -57,8 +103,12 @@ update_codex_cli() {
             echo "  ✓ Codex CLI updated"
         fi
     else
+        local exit_code=$?
         echo "  ⚠ Could not auto-update Codex CLI (continuing with installed version)"
-        sed "s/^/    /" /tmp/codex-update.log | tail -n 20 || true
+        if [ "$exit_code" -eq 124 ]; then
+            echo "    Update timed out after ${timeout_seconds}s"
+        fi
+        sed "s/^/    /" "$update_log" | tail -n 20 || true
     fi
 }
 
@@ -138,7 +188,7 @@ fi
 echo ""
 
 # Build environment override for branch if specified
-ENV_OVERRIDE="-e LLM_TYPE=codex -e USE_TMUX=$USE_TMUX"
+ENV_OVERRIDE="-e LLM_TYPE=codex -e USE_TMUX=$USE_TMUX -e npm_config_update_notifier=false -e NO_UPDATE_NOTIFIER=1"
 VOLUME_OVERRIDE=""
 if [ -n "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" ]; then
     ENV_OVERRIDE="$ENV_OVERRIDE -e AUTODEX_DESKTOP_INPUT_READY_MARKER=$AUTODEX_DESKTOP_INPUT_READY_MARKER"
