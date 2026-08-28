@@ -162,7 +162,14 @@ confirm_dangerous_startup_prompt() {
 
         if printf "%s\n" "$pane_text" | grep -Eiq "danger|bypass|skip[- ]permissions|sandbox|unsafe|untrusted|trust the contents|higher risk"; then
             if printf "%s\n" "$pane_text" | grep -Eiq "allow|exit|continue|quit|yes|no|press enter"; then
-                tmux -f "$tmux_conf" send-keys -t "$tmux_session" "$confirm_key"
+                if [ "$LLM_NAME" = "claude" ]; then
+                    # Claude Code 2.1.250 stopped treating the numeric option
+                    # as a selection shortcut. Its bypass prompt starts on
+                    # "No, exit", so move to "Yes, I accept" and confirm it.
+                    tmux -f "$tmux_conf" send-keys -t "$tmux_session" Down Enter
+                else
+                    tmux -f "$tmux_conf" send-keys -t "$tmux_session" "$confirm_key"
+                fi
                 return 0
             fi
         fi
