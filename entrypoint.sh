@@ -144,31 +144,64 @@ emit_desktop_input_ready_marker() {
     fi
 }
 
+# Both halves must match: a warning banner AND a confirmation affordance that
+# only a modal dialog renders. The banner alone is not enough -- once the CLI is
+# live it keeps a "bypass permissions on" hint in its footer, and treating that
+# as an open dialog would send stray keystrokes into a working session.
+dangerous_startup_prompt_visible() {
+    printf "%s\n" "$1" | grep -Eiq "warning|danger|bypass permissions|skip[- ]permissions|sandbox|yolo|unsafe|untrusted|trust the contents|higher risk" \
+        && printf "%s\n" "$1" | grep -Eiq "enter to confirm|press enter|yes, i accept|no, exit|yes, proceed|^[[:space:]]*[12][.)][[:space:]]"
+}
+
+# Answer the CLI's "you are running in a dangerous mode" consent dialog inside
+# the detached tmux session, then wait for it to actually disappear.
+#
+# Returns 0 when the pane is clear (dialog answered, or it never appeared) and
+# the caller may safely send further keystrokes; returns 1 if the session died
+# or the dialog is still up. Never return early while the dialog is on screen:
+# a stray Enter lands on the default choice, which is "No, exit".
 confirm_dangerous_startup_prompt() {
     local tmux_conf="$1"
     local tmux_session="$2"
-    local confirm_key="$3"
-    local attempts=40
+    local confirm_keys="$3"
+    local appear_attempts=40  # ~10s for the dialog to render
+    local clear_attempts=40   # ~10s for it to clear once we answer
+    local since_send=0
+    local sends_left=3
     local pane_text=""
+    local sent="false"
 
-    [ -n "$confirm_key" ] || return 0
+    [ -n "$confirm_keys" ] || return 0
 
-    while [ "$attempts" -gt 0 ]; do
+    while :; do
         if ! tmux -f "$tmux_conf" has-session -t "$tmux_session" 2>/dev/null; then
-            return 0
+            return 1
         fi
 
         pane_text=$(tmux -f "$tmux_conf" capture-pane -p -t "$tmux_session" -S -80 2>/dev/null || true)
 
-        if printf "%s\n" "$pane_text" | grep -Eiq "danger|bypass|skip[- ]permissions|sandbox|unsafe|untrusted|trust the contents|higher risk"; then
-            if printf "%s\n" "$pane_text" | grep -Eiq "allow|exit|continue|quit|yes|no|press enter"; then
-                tmux -f "$tmux_conf" send-keys -t "$tmux_session" "$confirm_key"
-                return 0
+        if dangerous_startup_prompt_visible "$pane_text"; then
+            # Re-send at most every ~2s so a slow repaint does not leak extra
+            # keystrokes into the CLI after the dialog has been dismissed.
+            if [ "$sends_left" -gt 0 ] && { [ "$sent" = "false" ] || [ "$since_send" -ge 8 ]; }; then
+                # Word splitting is intentional: "Down Enter" is two tmux keys.
+                # shellcheck disable=SC2086
+                tmux -f "$tmux_conf" send-keys -t "$tmux_session" $confirm_keys
+                sent="true"
+                since_send=0
+                sends_left=$((sends_left - 1))
             fi
+            clear_attempts=$((clear_attempts - 1))
+            [ "$clear_attempts" -gt 0 ] || return 1
+        elif [ "$sent" = "true" ]; then
+            return 0
+        else
+            appear_attempts=$((appear_attempts - 1))
+            [ "$appear_attempts" -gt 0 ] || return 0
         fi
 
         sleep 0.25
-        attempts=$((attempts - 1))
+        since_send=$((since_send + 1))
     done
 }
 
@@ -421,7 +454,7 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
         LLM_NAME="codex"
     fi
 
-    DANGEROUS_PROMPT_CHOICE=""
+    DANGEROUS_PROMPT_KEYS=""
 
     if [ "$LLM_NAME" = "codex" ]; then
         # Launch OpenAI Codex CLI
@@ -437,7 +470,7 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
         # This disables all approval prompts and sandboxing
         if [ "$CODEX_YOLO" = "true" ]; then
             LLM_CMD="$LLM_CMD --yolo"
-            DANGEROUS_PROMPT_CHOICE="1"
+            DANGEROUS_PROMPT_KEYS="1"
             echo "⚠️  Running with --yolo flag"
             echo "    This bypasses all approval prompts and sandboxing - use only in trusted environments"
         # Or add --ask-for-approval never for just disabling prompts
@@ -457,7 +490,10 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
         # This bypasses all permission checks (includes both skip-permissions and dangerously)
         if [ "$CLAUDE_SKIP_PERMISSIONS" = "true" ]; then
             LLM_CMD="$LLM_CMD --dangerously-skip-permissions"
-            DANGEROUS_PROMPT_CHOICE="2"
+            # The bypass-permissions dialog is an unnumbered select list
+            # ("> No, exit" / "Yes, I accept"), so move the cursor to the second
+            # entry and confirm rather than typing a menu number.
+            DANGEROUS_PROMPT_KEYS="Down Enter"
             echo "⚠️  Running with --dangerously-skip-permissions flag"
             echo "    This bypasses all permission checks - use only in trusted sandboxes"
         fi
@@ -501,7 +537,8 @@ TMUXCONF
             echo ""
             # Start detached so we can send /effort max before attaching
             tmux -u -f "$TMUX_CONF" new-session -d -s "$TMUX_SESSION" "$LLM_CMD $*"
-            confirm_dangerous_startup_prompt "$TMUX_CONF" "$TMUX_SESSION" "$DANGEROUS_PROMPT_CHOICE"
+            STARTUP_PANE_READY="true"
+            confirm_dangerous_startup_prompt "$TMUX_CONF" "$TMUX_SESSION" "$DANGEROUS_PROMPT_KEYS" || STARTUP_PANE_READY="false"
             if [ "$LLM_NAME" = "claude" ]; then
                 sleep 3
                 # If the CLI crashed during startup the tmux session is already
@@ -509,15 +546,24 @@ TMUXCONF
                 # sees the real error instead of tmux's "can't find session".
                 if ! tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
                     echo "⚠ tmux session exited before startup completed; re-running without tmux to surface the error."
+                    emit_desktop_input_ready_marker
                     exec $LLM_CMD "$@"
                 fi
-                tmux -f "$TMUX_CONF" send-keys -t "$TMUX_SESSION" "/effort max" Enter
-                sleep 1
+                # Only type into the pane once the consent dialog is gone. Sending
+                # Enter while it is still up confirms its default ("No, exit") and
+                # kills the CLI.
+                if [ "$STARTUP_PANE_READY" = "true" ]; then
+                    tmux -f "$TMUX_CONF" send-keys -t "$TMUX_SESSION" "/effort max" Enter
+                    sleep 1
+                else
+                    echo "⚠ Startup prompt still on screen; skipping /effort max so the prompt is left for you to answer."
+                fi
             fi
             # Same guard before attach: if the session died between the
             # send-keys delay and here, attach would error under set -e.
             if ! tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
                 echo "⚠ tmux session exited before attach; re-running without tmux to surface the error."
+                emit_desktop_input_ready_marker
                 exec $LLM_CMD "$@"
             fi
             emit_desktop_input_ready_marker
@@ -525,6 +571,7 @@ TMUXCONF
         fi
     fi
 
+    emit_desktop_input_ready_marker
     exec $LLM_CMD "$@"
 else
     # Execute the command passed to the container as-is
