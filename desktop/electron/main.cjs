@@ -10,6 +10,11 @@ const pty = require("node-pty");
 const MAX_TERMINAL_HISTORY_BYTES = 8 * 1024 * 1024;
 const STARTUP_INPUT_READY_MARKER = "\u001b]1337;AutodexInputReady\u0007";
 const MAX_STARTUP_INPUT_BUFFER_CHARS = 64 * 1024;
+// Last resort for the startup input gate. The CLI normally emits the ready
+// marker, but anything that stops it from getting there - a startup dialog the
+// container could not answer, a crash into a fallback launch path - would
+// otherwise leave the terminal permanently deaf to the keyboard.
+const STARTUP_INPUT_RELEASE_TIMEOUT_MS = 90_000;
 const liveSessions = new Map();
 const notificationCooldowns = new Map();
 const terminalHistory = new Map();
@@ -218,6 +223,10 @@ function releaseStartupInput(sessionId) {
 
   live.startupInputBuffering = false;
   live.startupInputMarkerRemainder = "";
+  if (live.startupInputReleaseTimer) {
+    clearTimeout(live.startupInputReleaseTimer);
+    live.startupInputReleaseTimer = null;
+  }
 
   const pendingInput = live.pendingStartupInput || "";
   live.pendingStartupInput = "";
@@ -865,6 +874,7 @@ async function startInteractiveSession(session, mode = "start", size) {
     startupInputBuffering: true,
     pendingStartupInput: "",
     startupInputMarkerRemainder: "",
+    startupInputReleaseTimer: setTimeout(() => releaseStartupInput(session.id), STARTUP_INPUT_RELEASE_TIMEOUT_MS),
   });
 
   upsertSession({
@@ -898,6 +908,10 @@ async function startInteractiveSession(session, mode = "start", size) {
   });
 
   term.onExit(async ({ exitCode, signal }) => {
+    const exiting = liveSessions.get(session.id);
+    if (exiting?.startupInputReleaseTimer) {
+      clearTimeout(exiting.startupInputReleaseTimer);
+    }
     liveSessions.delete(session.id);
 
     // During system sleep, PTY dies with non-zero exit — treat as detached, not error,
@@ -1426,6 +1440,10 @@ ipcMain.handle("sessions:input", async (_event, payload) => {
     if (payload.data === "\x03") {
       live.pendingStartupInput = "";
       live.startupInputBuffering = false;
+      if (live.startupInputReleaseTimer) {
+        clearTimeout(live.startupInputReleaseTimer);
+        live.startupInputReleaseTimer = null;
+      }
       live.term.write(payload.data);
       return true;
     }

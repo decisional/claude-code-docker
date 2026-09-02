@@ -157,6 +157,24 @@ activate_installed_claude_version() {
     ' sh "$requested_version" >/dev/null 2>&1
 }
 
+# entrypoint.sh is baked into the image, so a container built before a fix to it
+# keeps the old startup handling forever. Refresh it on every launch - it is the
+# same file the image was built from, and copying it in is what lets entrypoint
+# fixes land without a full rebuild.
+sync_container_entrypoint() {
+    local container_name="$1"
+
+    [ -f "$SCRIPT_DIR/entrypoint.sh" ] || return 0
+
+    if ! docker cp "$SCRIPT_DIR/entrypoint.sh" "${container_name}:/entrypoint.sh" >/dev/null 2>&1; then
+        echo "  ⚠ Could not refresh /entrypoint.sh in $container_name (using the image's copy)"
+        return 0
+    fi
+
+    docker exec -u 0 "$container_name" chmod 755 /entrypoint.sh >/dev/null 2>&1 || true
+    return 0
+}
+
 update_claude_cli() {
     local container_name="$1"
     local requested_version="${CLAUDE_CODE_VERSION#v}"
@@ -363,6 +381,7 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
 
     echo ""
     update_claude_cli "$CONTAINER_NAME"
+    sync_container_entrypoint "$CONTAINER_NAME"
 
     # Copy Claude instructions if they exist locally
     if [ -f "$HOME/.claude/CLAUDE.md" ]; then
@@ -469,6 +488,7 @@ else
 
     echo ""
     update_claude_cli "$CONTAINER_NAME"
+    sync_container_entrypoint "$CONTAINER_NAME"
 
     echo ""
 

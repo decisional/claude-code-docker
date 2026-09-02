@@ -138,45 +138,158 @@ install_dependencies() {
     fi
 }
 
+# Claude Code blocks on a folder-trust dialog the first time it opens a
+# directory. Under the Desktop app nobody can answer it: keystrokes stay
+# buffered until the CLI reports that it is ready, and it never gets that far.
+# Record the decision up front instead - the container only ever opens
+# repositories it cloned itself, which is what --dangerously-skip-permissions
+# already assumes.
+trust_claude_workspace() {
+    local workspace_dir="$1"
+    local config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    local profile="$config_dir/.claude.json"
+    local temporary_profile
+
+    [ "$LLM_NAME" = "claude" ] || return 0
+    [ -n "$workspace_dir" ] || return 0
+    [ -d "$config_dir" ] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    [ -f "$profile" ] || echo '{}' >"$profile" 2>/dev/null || return 0
+
+    if jq -e --arg dir "$workspace_dir" \
+        '(.projects[$dir].hasTrustDialogAccepted // false) == true' "$profile" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    temporary_profile=$(mktemp "$config_dir/.claude.json.tmp.XXXXXX" 2>/dev/null) || return 0
+    if jq --arg dir "$workspace_dir" \
+        '.projects //= {} | .projects[$dir] //= {} | .projects[$dir].hasTrustDialogAccepted = true' \
+        "$profile" >"$temporary_profile" 2>/dev/null && [ -s "$temporary_profile" ]; then
+        chmod 600 "$temporary_profile" 2>/dev/null || true
+        mv -f "$temporary_profile" "$profile"
+        echo "✓ Trusted $workspace_dir for Claude Code"
+    else
+        rm -f "$temporary_profile"
+    fi
+
+    return 0
+}
+
 emit_desktop_input_ready_marker() {
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
         printf '\033]1337;AutodexInputReady\a'
     fi
 }
 
-confirm_dangerous_startup_prompt() {
+# Claude Code and Codex both open with blocking startup dialogs: the folder
+# trust check and, when bypass flags are set, a permissions warning. tmux starts
+# the CLI detached, so those dialogs have to be answered here before the pane is
+# handed to the user.
+startup_dialog_visible() {
+    local pane_text="$1"
+
+    if [ "$LLM_NAME" = "claude" ]; then
+        # Match the option labels rather than the prose. Claude has reworded both
+        # prompts repeatedly - the trust check now reads "Quick safety check: Is
+        # this a project you created or one you trust?" and matched none of the
+        # old keywords - but each still offers "No, exit" against a "Yes, I ..."
+        # answer.
+        if printf '%s\n' "$pane_text" | grep -Eiq "no, exit|yes, i (accept|trust)|do you trust|quick safety check|enter to confirm"; then
+            return 0
+        fi
+        return 1
+    fi
+
+    if printf '%s\n' "$pane_text" | grep -Eiq "danger|bypass|skip[- ]permissions|sandbox|unsafe|untrusted|trust the contents|higher risk"; then
+        if printf '%s\n' "$pane_text" | grep -Eiq "allow|exit|continue|quit|yes|no|press enter"; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# True once the CLI is drawing its composer, i.e. once it is safe to type.
+startup_prompt_ready() {
+    # Matched against the composer footer, which differs by version and by
+    # permission mode: 2.1.258 in bypass mode shows "bypass permissions on
+    # (shift+tab to cycle) - <- for agents", older builds "? for shortcuts".
+    if printf '%s\n' "$1" | grep -Eiq "shift\+tab to cycle|for shortcuts|for agents|esc to interrupt|to send message|Try \""; then
+        return 0
+    fi
+    return 1
+}
+
+pane_has_content() {
+    [ -n "$(printf '%s' "$1" | tr -d '[:space:]')" ]
+}
+
+# Answers each startup dialog in turn and reports whether the CLI reached its
+# composer. A non-zero return means it did not, and the caller must then keep
+# its hands off the keyboard: an Enter sent into an open dialog selects the
+# highlighted option, which is "No, exit".
+confirm_startup_dialogs() {
     local tmux_conf="$1"
     local tmux_session="$2"
     local confirm_key="$3"
-    local attempts=40
+    local deadline=$(( $(date +%s) + 45 ))
+    local confirmations=0
+    local quiet_samples=0
+    local stuck_samples=0
     local pane_text=""
 
-    [ -n "$confirm_key" ] || return 0
+    # Codex without a confirm key has no dialog to answer and nothing typed into
+    # it afterwards, so skip the wait entirely.
+    if [ "$LLM_NAME" != "claude" ] && [ -z "$confirm_key" ]; then
+        return 0
+    fi
 
-    while [ "$attempts" -gt 0 ]; do
+    while [ "$(date +%s)" -lt "$deadline" ]; do
         if ! tmux -f "$tmux_conf" has-session -t "$tmux_session" 2>/dev/null; then
-            return 0
+            return 1
         fi
 
         pane_text=$(tmux -f "$tmux_conf" capture-pane -p -t "$tmux_session" -S -80 2>/dev/null || true)
 
-        if printf "%s\n" "$pane_text" | grep -Eiq "danger|bypass|skip[- ]permissions|sandbox|unsafe|untrusted|trust the contents|higher risk"; then
-            if printf "%s\n" "$pane_text" | grep -Eiq "allow|exit|continue|quit|yes|no|press enter"; then
+        if startup_dialog_visible "$pane_text"; then
+            quiet_samples=0
+            if [ "$confirmations" -lt 4 ]; then
                 if [ "$LLM_NAME" = "claude" ]; then
-                    # Claude Code 2.1.250 stopped treating the numeric option
-                    # as a selection shortcut. Its bypass prompt starts on
-                    # "No, exit", so move to "Yes, I accept" and confirm it.
+                    # Both dialogs open on the refusing option, so step down one
+                    # and confirm. The numeric shortcut stopped selecting an
+                    # option in Claude Code 2.1.250.
                     tmux -f "$tmux_conf" send-keys -t "$tmux_session" Down Enter
-                else
+                elif [ -n "$confirm_key" ]; then
                     tmux -f "$tmux_conf" send-keys -t "$tmux_session" "$confirm_key"
                 fi
+                confirmations=$((confirmations + 1))
+                sleep 1
+                continue
+            fi
+
+            # A dialog we could not answer. Hand the pane over now rather than
+            # sitting on the deadline: the user can read it and reply themselves.
+            stuck_samples=$((stuck_samples + 1))
+            if [ "$stuck_samples" -ge 4 ]; then
+                return 1
+            fi
+        elif startup_prompt_ready "$pane_text"; then
+            return 0
+        elif pane_has_content "$pane_text"; then
+            # No dialog, but no footer we recognise either. Settle for a few
+            # consecutive dialog-free samples so an unfamiliar composer does not
+            # stall startup for the full timeout.
+            quiet_samples=$((quiet_samples + 1))
+            if [ "$quiet_samples" -ge 6 ]; then
                 return 0
             fi
         fi
 
-        sleep 0.25
-        attempts=$((attempts - 1))
+        sleep 0.5
     done
+
+    return 1
 }
 
 
@@ -460,6 +573,8 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
         # Launch Claude Code CLI
         LLM_CMD="claude"
 
+        trust_claude_workspace "$(pwd)"
+
         # Add --dangerously-skip-permissions if enabled
         # This bypasses all permission checks (includes both skip-permissions and dangerously)
         if [ "$CLAUDE_SKIP_PERMISSIONS" = "true" ]; then
@@ -506,32 +621,44 @@ TMUXCONF
         else
             echo "▶ Starting new session in tmux..."
             echo ""
-            # Start detached so we can send /effort max before attaching
+            # Start detached so startup dialogs can be answered before attaching
             tmux -u -f "$TMUX_CONF" new-session -d -s "$TMUX_SESSION" "$LLM_CMD $*"
-            confirm_dangerous_startup_prompt "$TMUX_CONF" "$TMUX_SESSION" "$DANGEROUS_PROMPT_CHOICE"
-            if [ "$LLM_NAME" = "claude" ]; then
-                sleep 3
-                # If the CLI crashed during startup the tmux session is already
-                # gone. Fall back to running it in the foreground so the user
-                # sees the real error instead of tmux's "can't find session".
-                if ! tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
-                    echo "⚠ tmux session exited before startup completed; re-running without tmux to surface the error."
-                    exec $LLM_CMD "$@"
-                fi
-                tmux -f "$TMUX_CONF" send-keys -t "$TMUX_SESSION" "/effort max" Enter
-                sleep 1
+
+            STARTUP_READY="false"
+            if confirm_startup_dialogs "$TMUX_CONF" "$TMUX_SESSION" "$DANGEROUS_PROMPT_CHOICE"; then
+                STARTUP_READY="true"
             fi
-            # Same guard before attach: if the session died between the
-            # send-keys delay and here, attach would error under set -e.
+
+            # If the CLI crashed during startup the tmux session is already gone.
+            # Fall back to running it in the foreground so the user sees the real
+            # error instead of tmux's "can't find session".
             if ! tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
                 echo "⚠ tmux session exited before attach; re-running without tmux to surface the error."
+                emit_desktop_input_ready_marker
                 exec $LLM_CMD "$@"
             fi
+
+            # Only type once the CLI is actually at its composer. Sending Enter
+            # while a startup dialog is still open picks the highlighted option -
+            # "No, exit" - which killed the session before anyone could see it.
+            if [ "$LLM_NAME" = "claude" ] && [ "$STARTUP_READY" = "true" ]; then
+                tmux -f "$TMUX_CONF" send-keys -t "$TMUX_SESSION" "/effort max" Enter
+                sleep 1
+                if ! tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
+                    echo "⚠ tmux session exited before attach; re-running without tmux to surface the error."
+                    emit_desktop_input_ready_marker
+                    exec $LLM_CMD "$@"
+                fi
+            elif [ "$LLM_NAME" = "claude" ]; then
+                echo "⚠ Claude Code is still showing a startup prompt; skipping /effort max so your keys reach it."
+            fi
+
             emit_desktop_input_ready_marker
             exec tmux -u -f "$TMUX_CONF" attach-session -d -t "$TMUX_SESSION"
         fi
     fi
 
+    emit_desktop_input_ready_marker
     exec $LLM_CMD "$@"
 else
     # Execute the command passed to the container as-is
