@@ -18,6 +18,10 @@ const WINDOW_REPAINT_DELAYS = [60, 220, 480];
 const VIEWPORT_PAGE_KEYS = new Set(["PageUp", "PageDown"]);
 const VIEWPORT_LINE_KEYS = new Set(["ArrowUp", "ArrowDown"]);
 const SESSION_SIGNAL_VIEW_SUPPRESS_MS = 2500;
+const EMPTY_TEXT_REPLACEMENTS = [];
+const TEXT_REPLACEMENT_SESSION_RE = /^(claude|codex):/;
+const TEXT_REPLACEMENT_BOUNDARY_CHARS = new Set([" ", "\r", "\n", ".", ",", ";", ":", "!", "?", ")", "]", "}", "\"", "'"]);
+const PROMPT_NEWLINE_SEQUENCE = "\x1b\r";
 
 const STATUS_LABELS = {
   attached: "Attached",
@@ -167,11 +171,90 @@ function clipboardPathsFromText(text) {
   return paths.every(Boolean) ? paths : [];
 }
 
-const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
+function isTextReplacementSession(sessionId) {
+  return TEXT_REPLACEMENT_SESSION_RE.test(String(sessionId || ""));
+}
+
+function isTextReplacementBoundary(data) {
+  return data.length === 1 && TEXT_REPLACEMENT_BOUNDARY_CHARS.has(data);
+}
+
+function isTextReplacementControl(data) {
+  return data.length === 1 && /[\x00-\x1f\x7f]/.test(data);
+}
+
+function formatReplacementTextForPrompt(text) {
+  return String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .join(PROMPT_NEWLINE_SEQUENCE);
+}
+
+function applyTextReplacement(data, state, replacements, maxTriggerLength) {
+  if (!state || replacements.size === 0 || maxTriggerLength <= 0) {
+    if (state) {
+      state.token = "";
+      state.overflowed = false;
+    }
+    return data;
+  }
+
+  const finishToken = delimiter => {
+    const token = state.token || "";
+    const overflowed = Boolean(state.overflowed);
+    state.token = "";
+    state.overflowed = false;
+    if (overflowed || !token || !replacements.has(token)) {
+      return delimiter;
+    }
+
+    const replacement = formatReplacementTextForPrompt(replacements.get(token));
+    return `${"\x7f".repeat(Array.from(token).length)}${replacement}${delimiter}`;
+  };
+
+  if (data === PROMPT_NEWLINE_SEQUENCE) {
+    return finishToken(data);
+  }
+
+  if (data === "\x7f" || data === "\b") {
+    state.token = Array.from(state.token || "").slice(0, -1).join("");
+    return data;
+  }
+
+  if (data.length !== 1) {
+    state.token = "";
+    state.overflowed = false;
+    return data;
+  }
+
+  if (isTextReplacementBoundary(data)) {
+    return finishToken(data);
+  }
+
+  if (isTextReplacementControl(data)) {
+    state.token = "";
+    state.overflowed = false;
+    return data;
+  }
+
+  state.token = `${state.token || ""}${data}`;
+  const tokenChars = Array.from(state.token);
+  if (tokenChars.length > maxTriggerLength) {
+    state.token = tokenChars.slice(-maxTriggerLength).join("");
+    state.overflowed = true;
+  }
+  return data;
+}
+
+const SessionTerminal = memo(function SessionTerminal({ sessionId, active, textReplacements = EMPTY_TEXT_REPLACEMENTS }) {
   const containerRef = useRef(null);
   const terminalRef = useRef(null);
   const fitRef = useRef(null);
   const activeRef = useRef(active);
+  const textReplacementStateRef = useRef({ token: "", overflowed: false });
+  const textReplacementLookupRef = useRef(new Map());
+  const textReplacementMaxTriggerLengthRef = useRef(0);
   const resizeTimersRef = useRef(new Set());
   const lastResizeRef = useRef({ cols: 0, rows: 0 });
   const scheduleResizeRef = useRef(() => {});
@@ -203,6 +286,32 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     focusTerminalInput();
     requestAnimationFrame(focusTerminalInput);
   };
+
+  useEffect(() => {
+    if (!isTextReplacementSession(sessionId)) {
+      textReplacementLookupRef.current = new Map();
+      textReplacementMaxTriggerLengthRef.current = 0;
+      textReplacementStateRef.current.token = "";
+      textReplacementStateRef.current.overflowed = false;
+      return;
+    }
+
+    const replacements = new Map();
+    let maxTriggerLength = 0;
+    for (const item of Array.isArray(textReplacements) ? textReplacements : []) {
+      if (!item || typeof item.replace !== "string" || !item.replace) {
+        continue;
+      }
+
+      replacements.set(item.replace, typeof item.with === "string" ? item.with : "");
+      maxTriggerLength = Math.max(maxTriggerLength, Array.from(item.replace).length);
+    }
+
+    textReplacementLookupRef.current = replacements;
+    textReplacementMaxTriggerLengthRef.current = maxTriggerLength;
+    textReplacementStateRef.current.token = "";
+    textReplacementStateRef.current.overflowed = false;
+  }, [sessionId, textReplacements]);
 
   useEffect(() => {
     activeRef.current = active;
@@ -363,6 +472,15 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     // (arrows, pgup/pgdn, bare Esc) is left as-is so keyboard scrollback
     // navigation in copy-mode still works.
     const sendPromptKey = data => {
+      const nextData = isTextReplacementSession(sessionId)
+        ? applyTextReplacement(
+          data,
+          textReplacementStateRef.current,
+          textReplacementLookupRef.current,
+          textReplacementMaxTriggerLengthRef.current
+        )
+        : data;
+
       if (scrollUpDepth > 0) {
         if (data === "\x1b") {
           scrollUpDepth = 0;
@@ -373,7 +491,7 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
       }
       terminal.scrollToBottom();
       keepTerminalInputFocused();
-      window.desktopApi.sendInput({ sessionId, data });
+      window.desktopApi.sendInput({ sessionId, data: nextData });
     };
 
     terminal.onData(sendPromptKey);
@@ -1736,6 +1854,7 @@ export default function App() {
   const [showLinearSettings, setShowLinearSettings] = useState(false);
   const [showLinearBrowser, setShowLinearBrowser] = useState(false);
   const [activeTerminalTabId, setActiveTerminalTabId] = useState("");
+  const [textReplacements, setTextReplacements] = useState(EMPTY_TEXT_REPLACEMENTS);
   const [contextMenuSessionId, setContextMenuSessionId] = useState(null);
   const [sessionOrder, setSessionOrder] = useState(() => {
     if (typeof window === "undefined") return [];
@@ -1986,6 +2105,43 @@ export default function App() {
 
     return offCloseActiveSession;
   }, [sessions]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const refreshTextReplacements = async ({ force = false } = {}) => {
+      try {
+        const nextItems = await window.desktopApi.getTextReplacements({ force });
+        if (ignore) {
+          return;
+        }
+
+        setTextReplacements(Array.isArray(nextItems) ? nextItems : EMPTY_TEXT_REPLACEMENTS);
+      } catch {
+        if (!ignore) {
+          setTextReplacements(EMPTY_TEXT_REPLACEMENTS);
+        }
+      }
+    };
+
+    const refreshIfVisible = () => {
+      if (!document.hidden) {
+        refreshTextReplacements({ force: true });
+      }
+    };
+
+    refreshTextReplacements({ force: true });
+    const intervalId = setInterval(() => refreshTextReplacements(), 60_000);
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+
+    return () => {
+      ignore = true;
+      clearInterval(intervalId);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -2686,10 +2842,11 @@ export default function App() {
                         key={`${session.id}:${tabId}`}
                         sessionId={`${session.id}:${tabId}`}
                         active={session.id === activeSessionId && tabId === activeTerminalTabId}
+                        textReplacements={textReplacements}
                       />
                     ));
                   }
-                  return <SessionTerminal key={session.id} sessionId={session.id} active={session.id === activeSessionId} />;
+                  return <SessionTerminal key={session.id} sessionId={session.id} active={session.id === activeSessionId} textReplacements={textReplacements} />;
                 })}
               </section>
             </>
