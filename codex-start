@@ -41,14 +41,31 @@ sync_opendex_key() {
 # Keep Codex current whenever codex-start is used.
 update_codex_cli() {
     local container_name="$1"
+    local current_version
+    local latest_version
 
-    if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ] && [ "${CODEX_AUTO_UPDATE:-}" != "true" ]; then
-        echo "  Skipping Codex CLI auto-update during Desktop startup"
+    current_version=$(docker exec "$container_name" sh -lc "codex --version 2>/dev/null | awk '{print \$2}'" 2>/dev/null || true)
+    latest_version=$(npm view @openai/codex version --silent 2>/dev/null || true)
+    if [ -z "$latest_version" ]; then
+        latest_version=$(docker exec -u 0 "$container_name" sh -lc "NPM_CONFIG_CACHE=/tmp/npm-cache-root npm view @openai/codex version --silent" 2>/dev/null || true)
+    fi
+
+    if [ -n "$current_version" ] && [ -n "$latest_version" ] && [ "$current_version" = "$latest_version" ]; then
+        echo "  ✓ Codex CLI ready: codex-cli $current_version"
         return 0
     fi
 
-    echo "  Updating Codex CLI to latest..."
-    if docker exec -u 0 "$container_name" sh -lc "npm install -g @openai/codex@latest" >/tmp/codex-update.log 2>&1; then
+    if [ -z "$latest_version" ]; then
+        if [ -n "$current_version" ]; then
+            echo "  ⚠ Could not check latest Codex CLI version; using codex-cli $current_version"
+        else
+            echo "  ⚠ Could not check latest Codex CLI version"
+        fi
+        return 0
+    fi
+
+    echo "  Updating Codex CLI to latest ($latest_version)..."
+    if docker exec -u 0 "$container_name" sh -lc "NPM_CONFIG_CACHE=/tmp/npm-cache-root npm_config_progress=false npm_config_audit=false npm_config_fund=false timeout 120s npm install -g @openai/codex@${latest_version}" >/tmp/codex-update.log 2>&1; then
         local codex_version
         codex_version=$(docker exec "$container_name" sh -lc "codex --version 2>/dev/null | head -n 1" 2>/dev/null || true)
         if [ -n "$codex_version" ]; then
