@@ -6,6 +6,7 @@
 set -e
 
 NO_CACHE="${NO_CACHE:-false}"
+WITH_OPENDEX=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -13,15 +14,20 @@ while [[ $# -gt 0 ]]; do
             NO_CACHE=true
             shift
             ;;
+        --with-opendex)
+            WITH_OPENDEX=true
+            shift
+            ;;
         -h|--help)
-            echo "Usage: ./build.sh [--no-cache]"
+            echo "Usage: ./build.sh [--no-cache] [--with-opendex]"
             echo ""
             echo "Builds llm-docker-claude-code:latest. Docker cache is used by default."
+            echo "--with-opendex also preloads OpenDex and its dependencies for Desktop sessions."
             exit 0
             ;;
         *)
             echo "Unknown argument: $1" >&2
-            echo "Usage: ./build.sh [--no-cache]" >&2
+            echo "Usage: ./build.sh [--no-cache] [--with-opendex]" >&2
             exit 1
             ;;
     esac
@@ -138,6 +144,28 @@ if [ -n "$BUILD_GIT_REPO_URL" ]; then
     echo "   Repo: $BUILD_GIT_REPO_URL"
 fi
 
+# Git network results are not part of Docker's cache key. Include the current
+# remote revision so a normal rebuild cannot silently reuse an old checkout.
+resolve_revision() {
+    local revision
+    revision=$(GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code "$1" HEAD | awk 'NR == 1 {print $1}')
+    if [ -z "$revision" ]; then
+        echo "Could not resolve the current revision of $1" >&2
+        return 1
+    fi
+    printf '%s' "$revision"
+}
+BUILD_GIT_REVISION=""
+BUILD_OPENDEX_REVISION=""
+if [ -n "$BUILD_GIT_REPO_URL" ]; then
+    BUILD_GIT_REVISION=$(resolve_revision "$BUILD_GIT_REPO_URL")
+    echo "   Repository revision: $BUILD_GIT_REVISION"
+fi
+if [ "$WITH_OPENDEX" = true ]; then
+    BUILD_OPENDEX_REVISION=$(resolve_revision git@github.com:decisional/opendex.git)
+    echo "   OpenDex revision: $BUILD_OPENDEX_REVISION"
+fi
+
 if [ -n "$BUILD_NPM_INSTALL_DIR" ]; then
     echo "✅ NPM_INSTALL_DIR found in .env - will run npm install at build time"
     echo "   Directory: $BUILD_NPM_INSTALL_DIR"
@@ -186,6 +214,7 @@ echo "✅ Claude Code credentials extracted from keychain"
 echo ""
 echo "3. Creating temporary credentials files..."
 mkdir -p ./.build-temp
+trap 'rm -rf ./.build-temp' EXIT
 mkdir -p ./.build-temp/.ssh
 
 # Claude Code credentials
@@ -263,6 +292,7 @@ fi
 echo ""
 echo "4. Building Docker image..."
 BUILD_ARGS=(--build-arg "USER_ID=${CURRENT_UID}" --build-arg "GROUP_ID=${CURRENT_GID}")
+BUILD_ARGS+=(--build-arg "GIT_REVISION=${BUILD_GIT_REVISION}" --build-arg "OPENDEX_REVISION=${BUILD_OPENDEX_REVISION}")
 if [ -n "$BUILD_GIT_REPO_URL" ]; then
     BUILD_ARGS+=(--build-arg "GIT_REPO_URL=${BUILD_GIT_REPO_URL}")
     if [ -n "$BUILD_GIT_CLONE_DIR" ]; then
@@ -323,6 +353,9 @@ else
 fi
 if [ -n "$BUILD_NPM_INSTALL_DIR" ]; then
     echo "  - npm install: ✓ Pre-installed ($BUILD_NPM_INSTALL_DIR)"
+fi
+if [ "$WITH_OPENDEX" = true ]; then
+    echo "  - OpenDex: ✓ Pre-cloned with dependencies"
 fi
 echo ""
 echo "You can now run:"
