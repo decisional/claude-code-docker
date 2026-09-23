@@ -277,9 +277,15 @@ fi
 # keys the install layer's cache on this value, so the CLI is re-installed only when
 # this pin changes — not on every rebuild. Bump CLAUDE_CODE_VERSION to upgrade (or
 # set it to "latest" to track upstream). Keep this in sync with cc-start.
-CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.258}"
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.280}"
 echo "   Claude Code CLI: ${CLAUDE_CODE_VERSION} (pinned)"
 BUILD_ARGS+=(--build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}")
+
+# Pin the Codex CLI the same way. Bump CODEX_VERSION to upgrade (or set it to "latest"
+# to track upstream). Keep this in sync with codex-start.
+CODEX_VERSION="${CODEX_VERSION:-0.156.0}"
+echo "   Codex CLI: ${CODEX_VERSION} (pinned)"
+BUILD_ARGS+=(--build-arg "CODEX_VERSION=${CODEX_VERSION}")
 
 DOCKER_CACHE_ARGS=()
 if [ "$NO_CACHE" = true ]; then
