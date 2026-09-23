@@ -43,9 +43,9 @@ sync_opendex_key() {
     fi
 }
 
-# Keep Claude Code current whenever cc-start is used. Mirrors update_codex_cli in
-# codex-start, but uses the native installer (which installs into the node user's
-# ~/.local/bin), so it runs as the default container user rather than root.
+# Keep Claude Code current using the installed CLI. The bootstrap shell script
+# downloads an executable into the shared ~/.claude directory, where concurrent
+# container launches can collide with an executing download ("Text file busy").
 update_claude_cli() {
     local container_name="$1"
 
@@ -55,7 +55,7 @@ update_claude_cli() {
     fi
 
     echo "  Ensuring Claude Code CLI is at ${CLAUDE_CODE_VERSION}..."
-    if docker exec "$container_name" sh -lc "curl -fsSL https://claude.ai/install.sh | bash -s -- ${CLAUDE_CODE_VERSION}" >/tmp/claude-update.log 2>&1; then
+    if docker exec "$container_name" claude install "$CLAUDE_CODE_VERSION" >/tmp/claude-update.log 2>&1; then
         local claude_version
         claude_version=$(docker exec "$container_name" sh -lc "claude --version 2>/dev/null | head -n 1" 2>/dev/null || true)
         if [ -n "$claude_version" ]; then
