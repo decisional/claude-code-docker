@@ -1,8 +1,9 @@
 {
+  "skipDangerousModePermissionPrompt": true,
   "permissions": {
     "allow": [
-      "Bash(curl:*linear*)",
-      "Bash(cat:/home/node/.linear-api-key)"
+      "Bash(curl *linear*)",
+      "Bash(cat /home/node/.linear-api-key)"
     ]
   }
 }

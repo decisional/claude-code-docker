@@ -69,6 +69,11 @@ update_claude_cli() {
     fi
 }
 
+# Keep startup fixes available to existing images without rebuilding them.
+sync_container_entrypoint() {
+    docker cp "$SCRIPT_DIR/entrypoint.sh" "${1}:/entrypoint.sh"
+}
+
 # Parse arguments
 INSTANCE_NAME=""
 GIT_BRANCH_OVERRIDE=""
@@ -181,6 +186,7 @@ if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
     echo "✓ Container already running"
 
     echo ""
+    sync_container_entrypoint "$CONTAINER_NAME"
     update_claude_cli "$CONTAINER_NAME"
 
     # Copy Claude instructions if they exist locally
@@ -287,6 +293,7 @@ else
     fi
 
     echo ""
+    sync_container_entrypoint "$CONTAINER_NAME"
     update_claude_cli "$CONTAINER_NAME"
 
     echo ""

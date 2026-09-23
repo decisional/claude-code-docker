@@ -425,24 +425,24 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
 
     if [ "$LLM_NAME" = "codex" ]; then
         # Launch OpenAI Codex CLI
-        LLM_CMD="codex"
+        LLM_CMD=(codex)
 
         # Codex inside the desktop app is already wrapped by tmux. Inline mode
         # preserves scrollback and avoids trapping the live composer off-screen.
         if [ "${CODEX_NO_ALT_SCREEN:-true}" != "false" ]; then
-            LLM_CMD="$LLM_CMD --no-alt-screen"
+            LLM_CMD+=(--no-alt-screen)
         fi
 
         # Add --yolo flag if enabled (full bypass mode)
         # This disables all approval prompts and sandboxing
         if [ "$CODEX_YOLO" = "true" ]; then
-            LLM_CMD="$LLM_CMD --yolo"
+            LLM_CMD+=(--yolo)
             DANGEROUS_PROMPT_CHOICE="1"
             echo "⚠️  Running with --yolo flag"
             echo "    This bypasses all approval prompts and sandboxing - use only in trusted environments"
         # Or add --ask-for-approval never for just disabling prompts
         elif [ "$CODEX_NO_APPROVAL" = "true" ]; then
-            LLM_CMD="$LLM_CMD --ask-for-approval never"
+            LLM_CMD+=(--ask-for-approval never)
             echo "⚠️  Running with --ask-for-approval never flag"
             echo "    This disables approval prompts for all operations"
         fi
@@ -451,13 +451,12 @@ if [ "$1" = "llm" ] || [ "$1" = "claude" ] || [ "$1" = "codex" ]; then
         echo ""
     else
         # Launch Claude Code CLI
-        LLM_CMD="claude"
+        LLM_CMD=(claude --effort max)
 
         # Add --dangerously-skip-permissions if enabled
         # This bypasses all permission checks (includes both skip-permissions and dangerously)
         if [ "$CLAUDE_SKIP_PERMISSIONS" = "true" ]; then
-            LLM_CMD="$LLM_CMD --dangerously-skip-permissions"
-            DANGEROUS_PROMPT_CHOICE="2"
+            LLM_CMD+=(--dangerously-skip-permissions --settings '{"skipDangerousModePermissionPrompt":true}')
             echo "⚠️  Running with --dangerously-skip-permissions flag"
             echo "    This bypasses all permission checks - use only in trusted sandboxes"
         fi
@@ -499,33 +498,23 @@ TMUXCONF
         else
             echo "▶ Starting new session in tmux..."
             echo ""
-            # Start detached so we can send /effort max before attaching
-            tmux -u -f "$TMUX_CONF" new-session -d -s "$TMUX_SESSION" "$LLM_CMD $*"
+            # Configure Claude through flags/settings, never typed startup input.
+            printf -v TMUX_COMMAND '%q ' "${LLM_CMD[@]}" "$@"
+            tmux -u -f "$TMUX_CONF" new-session -d -s "$TMUX_SESSION" "$TMUX_COMMAND"
             confirm_dangerous_startup_prompt "$TMUX_CONF" "$TMUX_SESSION" "$DANGEROUS_PROMPT_CHOICE"
-            if [ "$LLM_NAME" = "claude" ]; then
-                sleep 3
-                # If the CLI crashed during startup the tmux session is already
-                # gone. Fall back to running it in the foreground so the user
-                # sees the real error instead of tmux's "can't find session".
-                if ! tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
-                    echo "⚠ tmux session exited before startup completed; re-running without tmux to surface the error."
-                    exec $LLM_CMD "$@"
-                fi
-                tmux -f "$TMUX_CONF" send-keys -t "$TMUX_SESSION" "/effort max" Enter
-                sleep 1
-            fi
-            # Same guard before attach: if the session died between the
-            # send-keys delay and here, attach would error under set -e.
+            # If startup fails, the foreground CLI must still accept input.
             if ! tmux -f "$TMUX_CONF" has-session -t "$TMUX_SESSION" 2>/dev/null; then
                 echo "⚠ tmux session exited before attach; re-running without tmux to surface the error."
-                exec $LLM_CMD "$@"
+                emit_desktop_input_ready_marker
+                exec "${LLM_CMD[@]}" "$@"
             fi
             emit_desktop_input_ready_marker
             exec tmux -u -f "$TMUX_CONF" attach-session -d -t "$TMUX_SESSION"
         fi
     fi
 
-    exec $LLM_CMD "$@"
+    emit_desktop_input_ready_marker
+    exec "${LLM_CMD[@]}" "$@"
 else
     # Execute the command passed to the container as-is
     exec "$@"
