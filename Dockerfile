@@ -121,12 +121,17 @@ ENV CYPRESS_INSTALL_BINARY=0
 # re-installed only when the pin changes — not on every rebuild. Accepts a version or
 # "stable"/"latest". Keep this default in sync with build.sh / cc-start.
 USER node
-ARG CLAUDE_CODE_VERSION=2.1.258
+ARG CLAUDE_CODE_VERSION=2.1.280
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}"
 USER root
 
-# Install OpenAI Codex CLI globally (always use latest version)
-RUN npm install -g @openai/codex
+# Install OpenAI Codex CLI globally.
+# CODEX_VERSION is pinned to a concrete version; build.sh passes the same value as a
+# --build-arg. Docker keys this layer's cache on that value, so the CLI is re-installed
+# only when the pin changes — not on every rebuild. Accepts a version or "latest".
+# Keep this default in sync with build.sh / codex-start.
+ARG CODEX_VERSION=0.156.0
+RUN npm install -g "@openai/codex@${CODEX_VERSION}"
 RUN npm install -g @decisional/cli
 
 # Expose package-manager shims for repos like OpenClaw/OpenDex that invoke pnpm directly.
