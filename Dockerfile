@@ -197,13 +197,16 @@ RUN if [ -f /home/node/.azure/msal_token_cache.json ]; then \
     fi && \
     chown -R node:node /home/node/.azure
 
-# Pre-clone repository at build time for faster container startup (optional)
-# If GIT_REPO_URL is provided as a build arg, the repo is cloned during build
-# so the entrypoint only needs to do a git pull instead of a full clone
+# Pre-clone repositories and install dependencies once per image. Revision args
+# invalidate Docker's cache when a remote repository changes.
 ARG GIT_REPO_URL=""
 ARG GIT_CLONE_DIR=""
+ARG GIT_REVISION=""
+ARG OPENDEX_REVISION=""
+ARG NPM_INSTALL_DIR=""
+COPY scripts/prewarm-repositories.sh /usr/local/bin/prewarm-repositories.sh
 COPY .build-temp/.ssh/ /tmp/.build-ssh/
-RUN if [ -n "${GIT_REPO_URL}" ]; then \
+RUN if [ -n "${GIT_REPO_URL}" ] || [ -n "${OPENDEX_REVISION}" ]; then \
         echo "Pre-cloning repository at build time..." && \
         mkdir -p /home/node/.ssh && \
         if ls /tmp/.build-ssh/id_* 1>/dev/null 2>&1; then \
@@ -213,53 +216,11 @@ RUN if [ -n "${GIT_REPO_URL}" ]; then \
             chown -R node:node /home/node/.ssh && \
             su -s /bin/bash node -c "ssh-keyscan github.com bitbucket.org gitlab.com >> /home/node/.ssh/known_hosts 2>/dev/null"; \
         fi && \
-        if [ -n "${GIT_CLONE_DIR}" ]; then \
-            TARGET_DIR="/workspace/${GIT_CLONE_DIR}"; \
-        else \
-            TARGET_DIR="/workspace/$(basename ${GIT_REPO_URL} .git)"; \
-        fi && \
         chown node:node /workspace && \
-        if su -s /bin/bash node -c "GIT_TERMINAL_PROMPT=0 git clone --depth 1 --config core.fsmonitor=false '${GIT_REPO_URL}' '${TARGET_DIR}'" 2>&1; then \
-            su -s /bin/bash node -c "cd '${TARGET_DIR}' && git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'" && \
-            touch /workspace/.build-cloned && \
-            chown node:node /workspace/.build-cloned && \
-            echo "Repository pre-cloned successfully"; \
-        else \
-            echo "Build-time clone failed (will clone at container startup instead)"; \
-        fi && \
+        su -s /bin/bash node -c 'GIT_TERMINAL_PROMPT=0 bash /usr/local/bin/prewarm-repositories.sh' && \
         rm -rf /home/node/.ssh; \
     fi && \
     rm -rf /tmp/.build-ssh
-
-# Build-time JS dependency install for faster startup (optional)
-# If NPM_INSTALL_DIR is set, run the repo's package manager in that directory
-# within the pre-cloned repo so dependencies are baked into the image.
-ARG NPM_INSTALL_DIR=""
-RUN if [ -n "${NPM_INSTALL_DIR}" ] && [ -n "${GIT_REPO_URL}" ]; then \
-        if [ -n "${GIT_CLONE_DIR}" ]; then \
-            INSTALL_PATH="/workspace/${GIT_CLONE_DIR}/${NPM_INSTALL_DIR}"; \
-        else \
-            INSTALL_PATH="/workspace/$(basename ${GIT_REPO_URL} .git)/${NPM_INSTALL_DIR}"; \
-        fi && \
-        if [ -d "${INSTALL_PATH}" ] && [ -f "${INSTALL_PATH}/package.json" ]; then \
-            echo "Installing JS dependencies in ${INSTALL_PATH}..." && \
-            if [ -f "${INSTALL_PATH}/pnpm-lock.yaml" ] || [ -f "${INSTALL_PATH}/pnpm-workspace.yaml" ]; then \
-                su -s /bin/bash node -c "cd '${INSTALL_PATH}' && if [ -f pnpm-lock.yaml ]; then corepack pnpm install --frozen-lockfile; else corepack pnpm install; fi" && \
-                echo "pnpm dependencies installed successfully in ${NPM_INSTALL_DIR}"; \
-            elif [ -f "${INSTALL_PATH}/yarn.lock" ]; then \
-                su -s /bin/bash node -c "cd '${INSTALL_PATH}' && corepack yarn install --immutable" && \
-                echo "yarn dependencies installed successfully in ${NPM_INSTALL_DIR}"; \
-            elif [ -f "${INSTALL_PATH}/package-lock.json" ] || [ -f "${INSTALL_PATH}/npm-shrinkwrap.json" ]; then \
-                su -s /bin/bash node -c "cd '${INSTALL_PATH}' && npm ci" && \
-                echo "npm dependencies installed successfully in ${NPM_INSTALL_DIR}"; \
-            else \
-                su -s /bin/bash node -c "cd '${INSTALL_PATH}' && npm install" && \
-                echo "npm dependencies installed successfully in ${NPM_INSTALL_DIR}"; \
-            fi; \
-        else \
-            echo "Warning: ${INSTALL_PATH} does not exist or has no package.json (skipping JS dependency install)"; \
-        fi; \
-    fi
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh

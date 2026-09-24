@@ -9,6 +9,7 @@ set -e
 
 # Determine script directory early (needed for sourcing .env and finding project files)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/scripts/wait-for-workspace.sh"
 
 # Source .env to read project configuration (GIT_REPO_URL, NPM_INSTALL_DIR, etc.)
 if [ -f "$SCRIPT_DIR/.env" ]; then
@@ -270,22 +271,7 @@ else
         echo "⏳ Setting up repository..."
         echo ""
 
-        # Follow logs until clone/pull is complete
-        docker logs -f "$CONTAINER_NAME" 2>&1 | while IFS= read -r line; do
-            echo "   $line"
-            # Break when clone is complete - let dependencies install in background
-            if echo "$line" | grep -q "Repository cloned successfully!"; then
-                break
-            fi
-            # Break when pre-cloned repo is ready (pull completed)
-            if echo "$line" | grep -q "Repository ready (pre-cloned)"; then
-                break
-            fi
-            # Also handle case where no git repo is configured
-            if echo "$line" | grep -q "No git repository configured"; then
-                break
-            fi
-        done
+        wait_for_workspace "$CONTAINER_NAME"
 
         echo ""
         echo "✓ Repository ready"
