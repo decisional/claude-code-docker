@@ -343,7 +343,7 @@ docker run -it --rm \
 
 - Node.js 20
 - Claude Code CLI (native installer - auto-updates enabled)
-- OpenAI Codex CLI (latest version)
+- OpenAI Codex CLI (pinned via `CODEX_VERSION`, default `0.154.0`)
 - Python 3 with pip, venv, Poetry, and common packages (psycopg2-binary, requests)
 - Go 1.23.5
 - Git
