@@ -6,6 +6,7 @@
   "author": "Decisional",
   "main": "electron/main.cjs",
   "scripts": {
+    "test": "node --test tests/*.test.cjs",
     "postinstall": "electron-rebuild -f -w node-pty",
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
