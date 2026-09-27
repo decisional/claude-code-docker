@@ -8,6 +8,7 @@ Plain Electron desktop surface for managing Claude Code and Codex Docker session
 - Opens existing sessions in an embedded terminal
 - Shows all known sessions in a left sidebar
 - Lets you stop, reset, and remove sessions
+- Right-click a session (or use its three-dot menu) to rename it. Manual names survive automatic title updates and app restarts until the session is removed.
 - Polls Docker for current container status
 
 ## Important v1 behavior

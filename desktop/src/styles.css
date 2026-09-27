@@ -667,7 +667,7 @@ input:focus {
 
 .session-item-wrap:hover .session-dots-btn,
 .session-dots-btn:focus-visible,
-.session-context-menu-wrap:has(> .session-context-menu) .session-dots-btn {
+.session-dots-btn.menu-open {
   opacity: 1;
 }
 
@@ -684,10 +684,7 @@ input:focus {
 }
 
 .session-context-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 4px;
+  position: fixed;
   min-width: 120px;
   background: var(--surface);
   border: 1px solid var(--line-strong);
@@ -713,7 +710,8 @@ input:focus {
   transition: background 120ms ease;
 }
 
-.session-context-menu button:hover {
+.session-context-menu button:hover,
+.session-context-menu button:focus-visible {
   background: var(--hover);
 }
 
@@ -1296,6 +1294,15 @@ input:focus {
 }
 
 /* ── Overlay / Composer ── */
+
+.session-rename-dialog {
+  color: var(--text);
+}
+
+.session-rename-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+}
 
 .overlay-root {
   position: fixed;

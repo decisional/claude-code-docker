@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   createSession: payload => ipcRenderer.invoke("sessions:create", payload),
   attachSession: payload => ipcRenderer.invoke("sessions:attach", payload),
   resetSession: payload => ipcRenderer.invoke("sessions:reset", payload),
+  renameSession: payload => ipcRenderer.invoke("sessions:rename", payload),
   stopSession: payload => ipcRenderer.invoke("sessions:stop", payload),
   removeSession: payload => ipcRenderer.invoke("sessions:remove", payload),
   createTab: payload => ipcRenderer.invoke("sessions:create-tab", payload),

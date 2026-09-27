@@ -297,6 +297,8 @@ function upsertSession(partial) {
     appState.sessions[existingIndex] = {
       ...appState.sessions[existingIndex],
       ...partial,
+      // Only sessions:rename owns this field; lifecycle updates may be stale.
+      customTitle: appState.sessions[existingIndex].customTitle,
     };
   } else {
     appState.sessions.push(partial);
@@ -762,6 +764,12 @@ async function refreshSessionsFromDocker() {
     return false;
   });
 
+  // A rename can arrive while Docker/git queries are in flight. Carry forward
+  // the latest user title even if a lifecycle update replaced the session object.
+  for (const session of alive) {
+    const current = getSessionById(session.id);
+    if (current) session.customTitle = current.customTitle;
+  }
   appState.sessions = dedupeSessions(sortedSessions(alive));
   await persistState();
   emit("sessions:changed", appState.sessions);
@@ -1373,6 +1381,23 @@ ipcMain.handle("sessions:create", async (_event, payload) => {
   upsertSession(session);
   await persistState();
   await startInteractiveSession(session, "start", payload.size || undefined);
+  return getSessionById(session.id);
+});
+
+ipcMain.handle("sessions:rename", async (_event, payload) => {
+  const session = getSessionById(payload?.sessionId);
+  if (!session) {
+    throw new Error("Session no longer exists.");
+  }
+  const title = typeof payload?.title === "string" ? payload.title.trim() : "";
+  if (!title || title.length > 200 || /[\r\n\x00-\x1f\x7f]/.test(title)) {
+    throw new Error("Enter a session name of 1–200 characters on a single line.");
+  }
+
+  // Keep Docker/PTY identifiers intact. Automatic thread titles stay separate.
+  session.customTitle = title;
+  await persistState();
+  emit("sessions:changed", appState.sessions);
   return getSessionById(session.id);
 });
 

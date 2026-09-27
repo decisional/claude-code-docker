@@ -116,10 +116,14 @@ function sessionMonogram(name) {
     .toUpperCase();
 }
 
+function sessionDisplayName(session) {
+  return session.customTitle || session.threadTitle || session.name;
+}
+
 function sessionTitle(session) {
   const branchDisplay = session.currentBranch || session.branch || "";
   const facts = [runtimeLabel(session.runtime), branchDisplay ? `branch ${branchDisplay}` : "", session.prNumber ? `PR #${session.prNumber}` : "", session.port ? `port ${session.port}` : ""].filter(Boolean);
-  return [session.name, facts.join(" | "), session.dockerStatus || ""].filter(Boolean).join("\n");
+  return [sessionDisplayName(session), facts.join(" | "), session.dockerStatus || ""].filter(Boolean).join("\n");
 }
 
 function escapePathForShell(filePath) {
@@ -1167,6 +1171,127 @@ function SessionAvatar({ session }) {
   );
 }
 
+function SessionActionsMenu({ menu, disabled, onAction, onClose }) {
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const element = menuRef.current;
+    const bounds = element.getBoundingClientRect();
+    element.style.left = `${Math.max(8, Math.min(menu.x, window.innerWidth - bounds.width - 8))}px`;
+    element.style.top = `${Math.max(8, Math.min(menu.y, window.innerHeight - bounds.height - 8))}px`;
+    const previousFocus = document.activeElement;
+    element.querySelector("button:not(:disabled)")?.focus();
+    const dismissOutside = event => {
+      if (!element.contains(event.target) && !event.target.closest(".session-dots-btn")) onClose();
+    };
+    window.addEventListener("pointerdown", dismissOutside);
+    window.addEventListener("resize", onClose);
+    window.addEventListener("scroll", onClose, true);
+    return () => {
+      window.removeEventListener("pointerdown", dismissOutside);
+      window.removeEventListener("resize", onClose);
+      window.removeEventListener("scroll", onClose, true);
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    };
+  }, [menu]);
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="session-context-menu"
+      role="menu"
+      aria-label="Session actions"
+      style={{ left: menu.x, top: menu.y }}
+      onKeyDown={event => {
+        if (event.key === "Escape" || event.key === "Tab") {
+          event.preventDefault();
+          onClose();
+        } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const buttons = [...menuRef.current.querySelectorAll("button:not(:disabled)")];
+          if (!buttons.length) return;
+          const index = buttons.indexOf(document.activeElement);
+          buttons[(index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length].focus();
+        }
+      }}
+    >
+      {[["rename", "Rename…"], ["stop", "Stop"], ["restart", "Restart"], ["remove", "Remove"]].map(([action, label]) => (
+        <button
+          key={action}
+          type="button"
+          role="menuitem"
+          className={action === "remove" ? "context-menu-danger" : undefined}
+          disabled={disabled}
+          onClick={() => onAction(action, menu.sessionId)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  );
+}
+
+function SessionRenameDialog({ session, onClose }) {
+  const [title, setTitle] = useState(() => sessionDisplayName(session));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const dialogRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    dialog.showModal();
+    inputRef.current.focus();
+    inputRef.current.select();
+    return () => dialog.close();
+  }, []);
+
+  const submit = async event => {
+    event.preventDefault();
+    if (saving || !title.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      await window.desktopApi.renameSession({ sessionId: session.id, title });
+      onClose();
+    } catch (renameError) {
+      setError(renameError.message || "Failed to rename session.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="session-rename-dialog overlay-card"
+      aria-labelledby="session-rename-title"
+      aria-describedby="session-rename-description"
+      onCancel={event => {
+        event.preventDefault();
+        if (!saving) onClose();
+      }}
+      onKeyDown={event => event.stopPropagation()}
+    >
+      <div className="overlay-header">
+        <h3 id="session-rename-title">Rename session</h3>
+      </div>
+      <form className="overlay-form" onSubmit={submit}>
+        <label className="overlay-field">
+          <span>Session name</span>
+          <input ref={inputRef} value={title} onChange={event => setTitle(event.target.value)} maxLength={200} required disabled={saving} />
+          <small id="session-rename-description">Your name stays until you rename or remove this session.</small>
+        </label>
+        {error ? <div className="error-banner" role="alert">{error}</div> : null}
+        <div className="overlay-footer">
+          <button type="button" className="secondary" onClick={onClose} disabled={saving}>Cancel</button>
+          <button type="submit" className="primary" disabled={saving || !title.trim()}>{saving ? "Saving…" : "Save"}</button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
 function SessionComposerOverlay({ open, sessions, disabled, onClose, onCreate, defaultRuntime }) {
   const [runtime, setRuntime] = useState(defaultRuntime || "claude");
 
@@ -1736,7 +1861,8 @@ export default function App() {
   const [showLinearSettings, setShowLinearSettings] = useState(false);
   const [showLinearBrowser, setShowLinearBrowser] = useState(false);
   const [activeTerminalTabId, setActiveTerminalTabId] = useState("");
-  const [contextMenuSessionId, setContextMenuSessionId] = useState(null);
+  const [sessionMenu, setSessionMenu] = useState(null);
+  const [renamingSessionId, setRenamingSessionId] = useState(null);
   const [sessionOrder, setSessionOrder] = useState(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -1782,6 +1908,7 @@ export default function App() {
   }, [sessionOrder]);
 
   const activeSession = useMemo(() => sessions.find(session => session.id === activeSessionId), [sessions, activeSessionId]);
+  const renamingSession = sessions.find(session => session.id === renamingSessionId);
 
   const perform = async (action, payload, onSuccess) => {
     try {
@@ -1806,12 +1933,13 @@ export default function App() {
       }
     });
 
-  useEffect(() => {
-    if (!contextMenuSessionId) return;
-    const handler = () => setContextMenuSessionId(null);
-    window.addEventListener("click", handler);
-    return () => window.removeEventListener("click", handler);
-  }, [contextMenuSessionId]);
+  const handleSessionAction = (action, sessionId) => {
+    setSessionMenu(null);
+    if (action === "rename") setRenamingSessionId(sessionId);
+    if (action === "stop") perform(window.desktopApi.stopSession, { sessionId });
+    if (action === "restart") perform(window.desktopApi.resetSession, { sessionId }, () => focusTerminal(sessionId));
+    if (action === "remove") closeSession(sessionId);
+  };
 
   const reorderSessions = (sourceId, targetId) => {
     if (!sourceId || !targetId || sourceId === targetId) return;
@@ -2305,6 +2433,10 @@ export default function App() {
                   }}
                   onDrop={event => handleSessionDrop(event, session.id)}
                   onDragEnd={handleSessionDragEnd}
+                  onContextMenu={event => {
+                    event.preventDefault();
+                    setSessionMenu({ sessionId: session.id, x: event.clientX, y: event.clientY });
+                  }}
                 >
                   <button
                     className={[
@@ -2328,7 +2460,7 @@ export default function App() {
                           <div className="session-title-line">
                             <div className="session-title-block">
                               <div className="session-title-row">
-                                <span className="session-title">{session.threadTitle || session.name}</span>
+                                <span className="session-title">{sessionDisplayName(session)}</span>
                                 {session.diffStats && (session.diffStats.totalAdditions > 0 || session.diffStats.totalDeletions > 0) ? (
                                   <span className="session-diff-stats">
                                     {session.diffStats.totalAdditions > 0 ? <span className="diff-stat-add">+{session.diffStats.totalAdditions}</span> : null}
@@ -2406,12 +2538,16 @@ export default function App() {
                   {!sidebarCollapsed ? (
                     <div className="session-context-menu-wrap">
                       <button
-                        className="session-dots-btn"
+                        className={`session-dots-btn ${sessionMenu?.sessionId === session.id ? "menu-open" : ""}`}
                         type="button"
                         title="Session actions"
+                        aria-label={`Actions for ${sessionDisplayName(session)}`}
+                        aria-haspopup="menu"
+                        aria-expanded={sessionMenu?.sessionId === session.id}
                         onClick={e => {
                           e.stopPropagation();
-                          setContextMenuSessionId(prev => prev === session.id ? null : session.id);
+                          const bounds = e.currentTarget.getBoundingClientRect();
+                          setSessionMenu(prev => prev?.sessionId === session.id ? null : { sessionId: session.id, x: bounds.left, y: bounds.bottom + 4 });
                         }}
                       >
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -2421,41 +2557,6 @@ export default function App() {
                         </svg>
                       </button>
 
-                      {contextMenuSessionId === session.id ? (
-                        <div className="session-context-menu" onClick={e => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setContextMenuSessionId(null);
-                              perform(window.desktopApi.stopSession, { sessionId: session.id });
-                            }}
-                            disabled={busy}
-                          >
-                            Stop
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setContextMenuSessionId(null);
-                              perform(window.desktopApi.resetSession, { sessionId: session.id }, () => focusTerminal(session.id));
-                            }}
-                            disabled={busy}
-                          >
-                            Restart
-                          </button>
-                          <button
-                            type="button"
-                            className="context-menu-danger"
-                            onClick={() => {
-                              setContextMenuSessionId(null);
-                              closeSession(session.id);
-                            }}
-                            disabled={busy}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -2535,7 +2636,7 @@ export default function App() {
                     <div className="main-heading-top">
                       <SessionAvatar session={activeSession} />
                       <div className="main-heading-copy">
-                        <h2>{activeSession.name}</h2>
+                        <h2>{sessionDisplayName(activeSession)}</h2>
                       </div>
                     </div>
                   </div>
@@ -2558,7 +2659,7 @@ export default function App() {
                       <SessionAvatar session={activeSession} />
                       <div className="main-heading-copy">
                         <div className="eyebrow">{activeSession.name}</div>
-                        <h2>{activeSession.threadTitle || activeSession.name}</h2>
+                        <h2>{sessionDisplayName(activeSession)}</h2>
                       </div>
                     </div>
 
@@ -2714,6 +2815,14 @@ export default function App() {
           <ReviewPanel session={activeSession} onClose={() => setReviewPanelOpen(false)} />
         ) : null}
       </div>
+
+      {sessionMenu && sessions.some(session => session.id === sessionMenu.sessionId) ? (
+        <SessionActionsMenu menu={sessionMenu} disabled={busy} onAction={handleSessionAction} onClose={() => setSessionMenu(null)} />
+      ) : null}
+
+      {renamingSession ? (
+        <SessionRenameDialog key={renamingSession.id} session={renamingSession} onClose={() => setRenamingSessionId(null)} />
+      ) : null}
 
       <SessionComposerOverlay
         open={showComposer}
