@@ -18,7 +18,7 @@ fi
 
 # Pin the Codex CLI version installed at start time. Keep this in sync with build.sh.
 # Bump to upgrade (or set CODEX_VERSION=latest to track upstream).
-CODEX_VERSION="${CODEX_VERSION:-0.156.0}"
+CODEX_VERSION="${CODEX_VERSION:-0.159.0}"
 
 emit_desktop_input_ready_marker() {
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
