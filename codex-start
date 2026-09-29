@@ -16,6 +16,10 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
+# Pin the Codex CLI version installed at start time. Keep this in sync with build.sh.
+# Bump to upgrade (or set CODEX_VERSION=latest to track upstream).
+CODEX_VERSION="${CODEX_VERSION:-0.154.0}"
+
 emit_desktop_input_ready_marker() {
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
         printf '\033]1337;AutodexInputReady\a'
@@ -38,7 +42,7 @@ sync_opendex_key() {
     fi
 }
 
-# Keep Codex current whenever codex-start is used.
+# Keep Codex at the pinned version whenever codex-start is used.
 update_codex_cli() {
     local container_name="$1"
 
@@ -47,8 +51,8 @@ update_codex_cli() {
         return 0
     fi
 
-    echo "  Updating Codex CLI to latest..."
-    if docker exec -u 0 "$container_name" sh -lc "npm install -g @openai/codex@latest" >/tmp/codex-update.log 2>&1; then
+    echo "  Ensuring Codex CLI is at ${CODEX_VERSION}..."
+    if docker exec -u 0 "$container_name" sh -lc "npm install -g @openai/codex@${CODEX_VERSION}" >/tmp/codex-update.log 2>&1; then
         local codex_version
         codex_version=$(docker exec "$container_name" sh -lc "codex --version 2>/dev/null | head -n 1" 2>/dev/null || true)
         if [ -n "$codex_version" ]; then
