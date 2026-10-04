@@ -1,0 +1,50 @@
+#!/bin/bash
+# Refresh the Claude Code session shared by every running container.
+# Usage: ./cc-auth [--status]
+#
+# cc-start and codex-start do this automatically, so launching any container
+# already re-authenticates the rest. Run this directly when you want the refresh
+# without starting anything.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/claude-auth-sync.sh
+. "$SCRIPT_DIR/scripts/claude-auth-sync.sh"
+
+CREDENTIALS_FILE="$SCRIPT_DIR/claude-data/.credentials.json"
+
+show_status() {
+    local container
+    local expiry
+    local label
+
+    if claude_auth_credentials_are_valid "$CREDENTIALS_FILE"; then
+        expiry=$(claude_auth_expires_at "$CREDENTIALS_FILE")
+        label=$(date -r "$((expiry / 1000))" 2>/dev/null || echo "unknown")
+        echo "Shared session: valid, expires $label"
+    else
+        echo "Shared session: BLANK — run ./cc-auth to repair"
+    fi
+
+    while IFS= read -r container; do
+        [ -n "$container" ] || continue
+        if docker exec "$container" sh -lc \
+            'jq -e ".claudeAiOauth.accessToken | type == \"string\" and length > 20" /home/node/.claude/.credentials.json' \
+            >/dev/null 2>&1; then
+            echo "  ✓ $container"
+        else
+            echo "  ✗ $container (no usable session)"
+        fi
+    done <<<"$(claude_auth_running_containers)"
+}
+
+if [ "${1:-}" = "--status" ]; then
+    show_status
+    exit 0
+fi
+
+echo "🔑 Refreshing Claude Code authentication"
+sync_claude_credentials
+echo ""
+show_status

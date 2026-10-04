@@ -16,6 +16,9 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
+# shellcheck source=scripts/claude-auth-sync.sh
+. "$SCRIPT_DIR/scripts/claude-auth-sync.sh"
+
 emit_desktop_input_ready_marker() {
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
         printf '\033]1337;AutodexInputReady\a'
@@ -164,6 +167,12 @@ fi
 if [ "$REPO_OVERRIDE" = "opendex" ]; then
     sync_opendex_key
 fi
+
+# Refresh the shared Claude Code session from the host Keychain so this launch
+# re-authenticates every running container, not just this one.
+echo "🔑 Syncing Claude Code authentication"
+sync_claude_credentials "$SCRIPT_DIR/claude-data"
+echo ""
 
 # Check if container already exists and is running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
