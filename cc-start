@@ -19,6 +19,8 @@ fi
 
 # shellcheck source=scripts/claude-auth-sync.sh
 . "$SCRIPT_DIR/scripts/claude-auth-sync.sh"
+# shellcheck source=scripts/codex-auth-sync.sh
+. "$SCRIPT_DIR/scripts/codex-auth-sync.sh"
 
 # Pin the Claude Code CLI version installed at start time. Keep this in sync with
 # build.sh. Bump to upgrade (or set CLAUDE_CODE_VERSION=latest to track upstream).
@@ -188,6 +190,8 @@ fi
 # re-authenticates every running container, not just this one.
 echo "🔑 Syncing Claude Code authentication"
 sync_claude_credentials "$SCRIPT_DIR/claude-data"
+echo "🔑 Syncing Codex authentication"
+sync_codex_credentials "$SCRIPT_DIR/codex-data"
 echo ""
 
 # Check if container already exists and is running

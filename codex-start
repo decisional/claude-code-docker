@@ -18,6 +18,8 @@ fi
 
 # shellcheck source=scripts/claude-auth-sync.sh
 . "$SCRIPT_DIR/scripts/claude-auth-sync.sh"
+# shellcheck source=scripts/codex-auth-sync.sh
+. "$SCRIPT_DIR/scripts/codex-auth-sync.sh"
 
 emit_desktop_input_ready_marker() {
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ]; then
@@ -172,6 +174,8 @@ fi
 # re-authenticates every running container, not just this one.
 echo "🔑 Syncing Claude Code authentication"
 sync_claude_credentials "$SCRIPT_DIR/claude-data"
+echo "🔑 Syncing Codex authentication"
+sync_codex_credentials "$SCRIPT_DIR/codex-data"
 echo ""
 
 # Check if container already exists and is running
