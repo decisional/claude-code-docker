@@ -1,5 +1,5 @@
 #!/bin/bash
-# Refresh the Claude Code session shared by every running container.
+# Refresh the Claude Code and Codex sessions shared by every running container.
 # Usage: ./cc-auth [--status]
 #
 # cc-start and codex-start do this automatically, so launching any container
@@ -11,8 +11,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/claude-auth-sync.sh
 . "$SCRIPT_DIR/scripts/claude-auth-sync.sh"
+# shellcheck source=scripts/codex-auth-sync.sh
+. "$SCRIPT_DIR/scripts/codex-auth-sync.sh"
 
 CREDENTIALS_FILE="$SCRIPT_DIR/claude-data/.credentials.json"
+CODEX_CREDENTIALS_FILE="$SCRIPT_DIR/codex-data/auth.json"
 
 show_status() {
     local container
@@ -25,6 +28,12 @@ show_status() {
         echo "Shared session: valid, expires $label"
     else
         echo "Shared session: BLANK — run ./cc-auth to repair"
+    fi
+
+    if codex_auth_credentials_are_valid "$CODEX_CREDENTIALS_FILE"; then
+        echo "Shared Codex session: valid, last refreshed $(codex_auth_last_refresh "$CODEX_CREDENTIALS_FILE")"
+    else
+        echo "Shared Codex session: MISSING — run ./cc-auth to repair"
     fi
 
     while IFS= read -r container; do
@@ -46,5 +55,7 @@ fi
 
 echo "🔑 Refreshing Claude Code authentication"
 sync_claude_credentials
+echo "🔑 Refreshing Codex authentication"
+sync_codex_credentials
 echo ""
 show_status
