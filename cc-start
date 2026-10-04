@@ -17,6 +17,9 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
+# shellcheck source=scripts/claude-auth-sync.sh
+. "$SCRIPT_DIR/scripts/claude-auth-sync.sh"
+
 # Pin the Claude Code CLI version installed at start time. Keep this in sync with
 # build.sh. Bump to upgrade (or set CLAUDE_CODE_VERSION=latest to track upstream).
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.258}"
@@ -180,6 +183,12 @@ fi
 if [ "$REPO_OVERRIDE" = "opendex" ]; then
     sync_opendex_key
 fi
+
+# Refresh the shared Claude Code session from the host Keychain so this launch
+# re-authenticates every running container, not just this one.
+echo "🔑 Syncing Claude Code authentication"
+sync_claude_credentials "$SCRIPT_DIR/claude-data"
+echo ""
 
 # Check if container already exists and is running
 if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
