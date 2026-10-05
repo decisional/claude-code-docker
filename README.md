@@ -61,6 +61,20 @@ docker-compose run --rm claude-code
 - Every container from this image is pre-authenticated
 - Rebuild when credentials expire or you want to update
 
+For Desktop sessions using both Autodex and OpenDex, build the shared image with:
+
+```bash
+./build.sh --with-opendex
+```
+
+The image includes the repository configured by `GIT_REPO_URL` and OpenDex,
+with Poetry dependencies (including `alakazam`) and root Node dependencies
+already installed. Each build resolves current remote revisions so Docker cannot
+reuse a stale repository snapshot. Pulling a host checkout alone does not update
+the image. New sessions still pull the latest selected branch and check for
+dependency changes in the background. Existing containers keep their workspaces;
+create a new session to use the rebuilt image.
+
 **For GitHub operations (push, PR creation):**
 ```bash
 # Authenticate GitHub CLI on your host first (one-time)
