@@ -130,7 +130,7 @@ USER root
 # --build-arg. Docker keys this layer's cache on that value, so the CLI is re-installed
 # only when the pin changes — not on every rebuild. Accepts a version or "latest".
 # Keep this default in sync with build.sh / codex-start.
-ARG CODEX_VERSION=0.159.0
+ARG CODEX_VERSION=0.162.1
 RUN npm install -g "@openai/codex@${CODEX_VERSION}"
 RUN npm install -g @decisional/cli
 

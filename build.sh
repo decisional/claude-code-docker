@@ -283,7 +283,7 @@ BUILD_ARGS+=(--build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}")
 
 # Pin the Codex CLI the same way. Bump CODEX_VERSION to upgrade (or set it to "latest"
 # to track upstream). Keep this in sync with codex-start.
-CODEX_VERSION="${CODEX_VERSION:-0.159.0}"
+CODEX_VERSION="${CODEX_VERSION:-0.162.1}"
 echo "   Codex CLI: ${CODEX_VERSION} (pinned)"
 BUILD_ARGS+=(--build-arg "CODEX_VERSION=${CODEX_VERSION}")
 
