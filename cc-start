@@ -54,6 +54,11 @@ sync_opendex_key() {
 update_claude_cli() {
     local container_name="$1"
 
+    if [ "${CLAUDE_AUTO_UPDATE:-}" = "false" ]; then
+        echo "  Skipping Claude Code CLI auto-update (CLAUDE_AUTO_UPDATE=false)"
+        return 0
+    fi
+
     if [ "${AUTODEX_DESKTOP_INPUT_READY_MARKER:-}" = "1" ] && [ "${CLAUDE_AUTO_UPDATE:-}" != "true" ]; then
         echo "  Skipping Claude Code CLI auto-update during Desktop startup"
         return 0
