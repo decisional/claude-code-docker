@@ -6,6 +6,7 @@ A Docker container with Claude Code CLI, OpenAI Codex CLI, and Git pre-installed
 
 - Docker and Docker Compose installed
 - Git configured on your host machine
+- Python 3 on the host (used to synchronize cached Linux CLI builds)
 - **For Claude Code**: Claude Code installed on macOS (run `claude login` to authenticate)
 - **For Codex CLI**: OpenAI API key (get from https://platform.openai.com/api-keys)
 
@@ -342,8 +343,8 @@ docker run -it --rm \
 ## Features
 
 - Node.js 20
-- Claude Code CLI (native installer - auto-updates enabled)
-- OpenAI Codex CLI (latest version)
+- Claude Code CLI (native Linux build matching the host CLI at session start)
+- OpenAI Codex CLI (Linux build matching the host CLI at session start)
 - Python 3 with pip, venv, Poetry, and common packages (psycopg2-binary, requests)
 - Go 1.23.5
 - Git
@@ -476,28 +477,36 @@ RUN npm install -g pg
 
 ## Troubleshooting
 
-### Updating Claude Code to a newer version
+### Keeping container CLIs aligned with the host
 
-The Docker image uses the native Claude Code installer which supports auto-updates. To manually update:
+`cc-start` and `codex-start` read the version of the corresponding CLI on your
+host. Since macOS executables cannot run in Linux containers, the launchers
+prepare the matching Linux release in `cli-data/linux-cli-cache/`, keyed by CLI,
+container architecture, and version. Update your host CLI normally; the next
+session launch detects its new version and prepares that Linux release once.
 
-```bash
-# 1. Inside a running container
-docker exec -it <container-name> bash
-claude install
+A matching installation already in the target container can seed the cache.
+Otherwise a disposable container downloads the exact version without mounting
+your workspace or credentials. Downloads are locked across concurrent launches,
+validated with `--version`, and published only after success. The first launch
+for a version can take several minutes and prints that it is downloading.
+Later containers copy the cached installation locally; reconnecting to a container
+that already has that version skips the copy. No image rebuild is required.
 
-# 2. Or rebuild the Docker image to get the latest version
-./build.sh
+Each container keeps versioned executables and switches a small launcher wrapper
+atomically. Running sessions keep their existing process; reconnecting to a live
+tmux session does not restart it. A fresh CLI process uses the selected version.
+Claude's built-in updater is disabled in this wrapper so it stays aligned with
+the host. The old `CLAUDE_AUTO_UPDATE`, `CODEX_AUTO_UPDATE`, and startup
+`CLAUDE_CODE_VERSION` settings no longer control session CLI selection
+(`CLAUDE_CODE_VERSION` can still select the build-time image version).
 
-# 3. Restart your containers with the new image
-./cc-stop <instance-name>
-./cc-start <instance-name>
-```
+If the host CLI is unavailable, startup uses the existing container CLI. If a
+new matching release cannot be downloaded, startup reports the mismatch and uses
+a working installed CLI, retrying on the next launch. Complete cached releases
+work offline. Old releases remain cached for reuse.
 
-**Native installer benefits:**
-- Auto-updates enabled by default
-- Official installation method recommended by Anthropic
-- More stable than npm-based installation
-- No Node.js version conflicts
+Run cache regression checks with `python3 scripts/test_cli_cache.py`.
 
 ### Error: "not a directory" when mounting .gitconfig
 
