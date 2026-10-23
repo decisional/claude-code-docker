@@ -26,3 +26,6 @@ desktop/out/
 
 # Docker
 .dockerignore
+
+# Shared Linux CLI releases downloaded for desktop sessions
+cli-data/
