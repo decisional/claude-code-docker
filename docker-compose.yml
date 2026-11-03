@@ -7,6 +7,14 @@ services:
     tty: true
     env_file:
       - .env
+      # Long-lived Claude Code tokens from `claude setup-token`, kept outside the
+      # repo. Each file holds CLAUDE_CODE_OAUTH_TOKEN=...; the later file wins.
+      # With neither present, containers use the host Keychain session that
+      # cc-start syncs into claude-data/.credentials.json.
+      - path: ../anthropic.env
+        required: false
+      - path: ../anthropic-tools.env
+        required: false
     environment:
       # LLM CLI selection (claude or codex)
       - LLM_TYPE=${LLM_TYPE:-claude}
