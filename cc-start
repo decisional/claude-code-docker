@@ -247,7 +247,7 @@ else
     if docker ps -aq -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
         echo "✓ Container exists but stopped"
         echo "  Starting existing container..."
-        docker-compose -p "$PROJECT_NAME" start
+        docker start "$CONTAINER_NAME"
     else
         echo "✓ Creating new container..."
         docker-compose -p "$PROJECT_NAME" run -d --name "$CONTAINER_NAME" $RUN_EXTRA_FLAGS claude-code tail -f /dev/null
