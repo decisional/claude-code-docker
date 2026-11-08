@@ -480,8 +480,11 @@ set -g aggressive-resize on
 # Scroll 1 line per wheel event instead of the default 5 so that the
 # desktop app's throttled wheel handler produces smooth, continuous
 # scrolling rather than jerky 5-line jumps.
-bind -n WheelUpPane if-shell -F -t = "#{pane_in_mode}" "send-keys -X scroll-up" "copy-mode -e; send-keys -X scroll-up"
-bind -n WheelDownPane if-shell -F -t = "#{pane_in_mode}" "send-keys -X scroll-down"
+# If the app inside asked for mouse events (Claude Code's fullscreen renderer
+# runs on the alternate screen with no tmux history), pass the wheel through so
+# the app scrolls itself instead of tmux entering an empty copy-mode.
+bind -n WheelUpPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if-shell -F -t = '#{pane_in_mode}' 'send-keys -X scroll-up' 'copy-mode -e; send-keys -X scroll-up'"
+bind -n WheelDownPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if-shell -F -t = '#{pane_in_mode}' 'send-keys -X scroll-down'"
 TMUXCONF
 
         # On reset (RESET_TO_MAIN=true), kill the old tmux session so we get a fresh CLI.
