@@ -260,29 +260,45 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     fit.fit();
 
     // Translate wheel into SGR mouse escapes (64=up, 65=down) and send to the
-    // pty so tmux copy-mode scroll works. Returns false to suppress xterm.js's
-    // default alt-screen behavior of converting wheel into arrow-up/down keys
-    // (which cycles Claude/Codex prompt-box history instead of scrolling).
+    // pty. tmux turns each one into a 1-line copy-mode scroll, or forwards it
+    // to the app when the app has mouse tracking on (Claude Code's fullscreen
+    // renderer). Returns false to suppress xterm.js's default alt-screen
+    // behavior of converting wheel into arrow-up/down keys (which cycles
+    // Claude/Codex prompt-box history instead of scrolling).
+    //
+    // Wheel distance is converted to steps (one per WHEEL_PIXELS_PER_STEP), so
+    // a fast flick scrolls further than a slow one and trackpad events are
+    // accumulated instead of dropped.
     //
     // scrollUpDepth approximates how many net wheel-up steps we've sent tmux
-    // without a matching wheel-down. While > 0 we assume tmux is parked in
+    // without a matching wheel-down. While > 0 we assume tmux may be parked in
     // copy-mode; the onData handler below uses this to auto-cancel copy-mode
     // when the user types, so the keystroke reaches the live input prompt.
-    let lastWheelTime = 0;
+    const WHEEL_PIXELS_PER_STEP = 16;
+    const MAX_WHEEL_STEPS_PER_EVENT = 15;
+    let wheelRemainder = 0;
     let scrollUpDepth = 0;
     terminal.attachCustomWheelEventHandler(e => {
       keepTerminalInputFocused();
       if (terminal.buffer.active.type !== "alternate") return true;
       if (e.deltaY === 0) return true;
-      const now = Date.now();
-      if (now - lastWheelTime < 30) return false;
-      lastWheelTime = now;
-      if (e.deltaY < 0) {
-        scrollUpDepth += 1;
-        window.desktopApi.sendInput({ sessionId, data: "\x1b[<64;1;1M" });
+      const pixels = e.deltaMode === 1
+        ? e.deltaY * WHEEL_PIXELS_PER_STEP
+        : e.deltaMode === 2
+          ? e.deltaY * WHEEL_PIXELS_PER_STEP * terminal.rows
+          : e.deltaY;
+      if (Math.sign(pixels) !== Math.sign(wheelRemainder)) wheelRemainder = 0;
+      wheelRemainder += pixels;
+      const rawSteps = Math.trunc(wheelRemainder / WHEEL_PIXELS_PER_STEP);
+      if (rawSteps === 0) return false;
+      wheelRemainder -= rawSteps * WHEEL_PIXELS_PER_STEP;
+      const steps = Math.min(Math.abs(rawSteps), MAX_WHEEL_STEPS_PER_EVENT);
+      if (rawSteps < 0) {
+        scrollUpDepth += steps;
+        window.desktopApi.sendInput({ sessionId, data: "\x1b[<64;1;1M".repeat(steps) });
       } else {
-        scrollUpDepth = Math.max(0, scrollUpDepth - 1);
-        window.desktopApi.sendInput({ sessionId, data: "\x1b[<65;1;1M" });
+        scrollUpDepth = Math.max(0, scrollUpDepth - steps);
+        window.desktopApi.sendInput({ sessionId, data: "\x1b[<65;1;1M".repeat(steps) });
       }
       return false;
     });
@@ -291,7 +307,13 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
     // them through lets keyboard-scroll users keep navigating. Everything
     // else (letters, Enter, Tab, Backspace, Ctrl-combos) is treated as
     // "the user wants to type into the live prompt", so we cancel copy-mode
-    // with a "q" first and then deliver the real keystroke.
+    // first (see TMUX_CANCEL_COPY_MODE_KEY) and then deliver the real keystroke.
+    //
+    // TMUX_CANCEL_COPY_MODE_KEY is a private key the container's tmux.conf
+    // binds to "leave copy-mode if in it, otherwise do nothing". A literal "q"
+    // would leak into the prompt when the wheel went to the app instead of
+    // tmux copy-mode.
+    const TMUX_CANCEL_COPY_MODE_KEY = "\x1b[9999~";
     const COPY_MODE_NAV_RE = /^\x1b(?:\[(?:[ABCDHF]|5~|6~)|O[ABCDHF])?$/;
 
     terminalRef.current = terminal;
@@ -371,7 +393,7 @@ const SessionTerminal = memo(function SessionTerminal({ sessionId, active }) {
         if (data === "\x1b") {
           scrollUpDepth = 0;
         } else if (!COPY_MODE_NAV_RE.test(data)) {
-          window.desktopApi.sendInput({ sessionId, data: "q" });
+          window.desktopApi.sendInput({ sessionId, data: TMUX_CANCEL_COPY_MODE_KEY });
           scrollUpDepth = 0;
         }
       }
