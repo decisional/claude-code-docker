@@ -125,8 +125,9 @@ ARG CLAUDE_CODE_VERSION=2.1.258
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}"
 USER root
 
-# Install OpenAI Codex CLI globally (always use latest version)
-RUN npm install -g @openai/codex
+# Pin OpenAI Codex CLI so version updates invalidate the Docker install cache.
+ARG CODEX_VERSION=0.170.0
+RUN npm install -g "@openai/codex@${CODEX_VERSION}"
 RUN npm install -g @decisional/cli
 
 # Expose package-manager shims for repos like OpenClaw/OpenDex that invoke pnpm directly.
